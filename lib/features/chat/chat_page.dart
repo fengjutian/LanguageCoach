@@ -95,7 +95,8 @@ class _ChatPageState extends State<ChatPage> {
 
   void _showVoiceError(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> send() async {
