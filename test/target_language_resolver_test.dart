@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:language_coach/core/language/target_language_resolver.dart';
-import 'package:language_coach/core/model/app_settings.dart';
+import 'package:language_coach/core/models/app_settings.dart';
 
 void main() {
   const preferred = CoachLanguage.english;

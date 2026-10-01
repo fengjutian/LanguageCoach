@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../features/home/home_page.dart';
 
-class LanguageCoachApp extends StatelessWidget {
+class LanguageCoachApp extends ConsumerWidget {
   const LanguageCoachApp({super.key});
 
   @override
