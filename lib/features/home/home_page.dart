@@ -1,29 +1,26 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../core/ai/conversation_engine.dart';
-import '../../core/model/app_settings.dart';
 import '../chat/chat_page.dart';
 import '../history/history_page.dart';
 import '../settings/settings_page.dart';
 
-class HomePage extends StatefulWidget {
-  const HomePage({required this.engine, required this.settings, super.key});
-  final ConversationEngine engine;
-  final AppSettings settings;
+class HomePage extends ConsumerStatefulWidget {
+  const HomePage({super.key});
 
   @override
-  State<HomePage> createState() => _HomePageState();
+  ConsumerState<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> {
+class _HomePageState extends ConsumerState<HomePage> {
   int index = 0;
 
   @override
   Widget build(BuildContext context) {
-    final pages = [
-      ChatPage(engine: widget.engine, settings: widget.settings),
-      const HistoryPage(),
-      SettingsPage(settings: widget.settings),
+    final pages = const [
+      ChatPage(),
+      HistoryPage(),
+      SettingsPage(),
     ];
     return Scaffold(
       body: SafeArea(

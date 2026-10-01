@@ -2,27 +2,24 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../core/ai/conversation_engine.dart';
-import '../../core/model/app_settings.dart';
-import '../../core/model/chat_models.dart';
-import '../../core/native/native_ai_bridge.dart';
+import '../../core/models/chat_models.dart';
+import '../settings/application/settings_controller.dart';
+import 'application/conversation_providers.dart';
 import 'widgets/message_bubble.dart';
 
-class ChatPage extends StatefulWidget {
-  const ChatPage({required this.engine, required this.settings, super.key});
-  final ConversationEngine engine;
-  final AppSettings settings;
+class ChatPage extends ConsumerStatefulWidget {
+  const ChatPage({super.key});
 
   @override
-  State<ChatPage> createState() => _ChatPageState();
+  ConsumerState<ChatPage> createState() => _ChatPageState();
 }
 
-class _ChatPageState extends State<ChatPage> {
+class _ChatPageState extends ConsumerState<ChatPage> {
   final controller = TextEditingController();
   final scrollController = ScrollController();
   final messages = <ChatMessage>[];
-  final nativeAi = const NativeAiBridge();
   StreamSubscription<Object?>? nativeEventSubscription;
   bool isLoading = false;
   bool isListening = false;
@@ -30,7 +27,11 @@ class _ChatPageState extends State<ChatPage> {
   @override
   void initState() {
     super.initState();
-    nativeEventSubscription = nativeAi.eventStream.listen(
+    // Subscribe to the bridge lazily so we capture the current instance on
+    // first frame — Riverpod overrides in tests swap this provider without
+    // touching widget state.
+    final bridge = ref.read(nativeAiBridgeProvider);
+    nativeEventSubscription = bridge.eventStream.listen(
       _handleNativeEvent,
       onError: (Object error) => _showVoiceError(error.toString()),
     );
@@ -39,7 +40,10 @@ class _ChatPageState extends State<ChatPage> {
   @override
   void dispose() {
     nativeEventSubscription?.cancel();
-    if (isListening) nativeAi.cancelListening();
+    if (isListening) {
+      // The listener may have been disposed already (tests) — best effort.
+      unawaited(ref.read(nativeAiBridgeProvider).cancelListening());
+    }
     controller.dispose();
     scrollController.dispose();
     super.dispose();
@@ -47,18 +51,19 @@ class _ChatPageState extends State<ChatPage> {
 
   Future<void> toggleListening() async {
     if (isListening) {
-      await nativeAi.stopListening();
+      await ref.read(nativeAiBridgeProvider).stopListening();
       return;
     }
     try {
-      final available = await nativeAi.isSpeechRecognitionAvailable();
+      final available =
+          await ref.read(nativeAiBridgeProvider).isSpeechRecognitionAvailable();
       if (!available) {
         _showVoiceError('当前设备没有可用的语音识别服务');
         return;
       }
-      await nativeAi.startListening(
-        language: widget.settings.preferredLanguage.code,
-      );
+      await ref.read(nativeAiBridgeProvider).startListening(
+            language: ref.read(settingsControllerProvider).preferredLanguage.code,
+          );
     } on PlatformException catch (error) {
       _showVoiceError(error.message ?? '无法启动语音识别');
     }
@@ -116,7 +121,8 @@ class _ChatPageState extends State<ChatPage> {
     });
     _scrollDown();
     try {
-      final response = await widget.engine.reply(text);
+      final engine = ref.read(conversationEngineProvider);
+      final response = await engine.reply(text);
       if (mounted) setState(() => messages.add(response));
     } finally {
       if (mounted) setState(() => isLoading = false);
@@ -140,7 +146,7 @@ class _ChatPageState extends State<ChatPage> {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        _Header(settings: widget.settings),
+        const _Header(),
         Expanded(
           child: messages.isEmpty
               ? const _EmptyState()
@@ -158,10 +164,7 @@ class _ChatPageState extends State<ChatPage> {
                         ),
                       );
                     }
-                    return MessageBubble(
-                      message: messages[index],
-                      settings: widget.settings,
-                    );
+                    return MessageBubble(message: messages[index]);
                   },
                 ),
         ),
@@ -176,37 +179,34 @@ class _ChatPageState extends State<ChatPage> {
   }
 }
 
-class _Header extends StatelessWidget {
-  const _Header({required this.settings});
-  final AppSettings settings;
+class _Header extends ConsumerWidget {
+  const _Header();
 
   @override
-  Widget build(BuildContext context) {
-    return ListenableBuilder(
-      listenable: settings,
-      builder: (context, _) => Padding(
-        padding: const EdgeInsets.fromLTRB(20, 16, 12, 8),
-        child: Row(
-          children: [
-            const Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Language Coach',
-                    style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800),
-                  ),
-                  Text('自然地说，自信地学', style: TextStyle(color: Colors.black54)),
-                ],
-              ),
+  Widget build(BuildContext context, WidgetRef ref) {
+    final settings = ref.watch(settingsControllerProvider);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 16, 12, 8),
+      child: Row(
+        children: [
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Language Coach',
+                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800),
+                ),
+                Text('自然地说，自信地学', style: TextStyle(color: Colors.black54)),
+              ],
             ),
-            Chip(
-              label: Text(
-                '${settings.preferredLanguage.flag} ${settings.preferredLanguage.label}',
-              ),
+          ),
+          Chip(
+            label: Text(
+              '${settings.preferredLanguage.flag} ${settings.preferredLanguage.label}',
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

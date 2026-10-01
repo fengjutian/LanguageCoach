@@ -1,19 +1,20 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/model/app_settings.dart';
-import '../../../core/model/chat_models.dart';
+import '../../../core/models/chat_models.dart';
+import '../../settings/application/settings_controller.dart';
 
-class MessageBubble extends StatelessWidget {
-  const MessageBubble({
-    required this.message,
-    required this.settings,
-    super.key,
-  });
+/// Speech-speed stops mirrored from the settings page so the bubble on every
+/// message stays in lock-step with the chosen value.
+const _kBubbleSpeedStops = <double>[0.75, 0.85, 1.0, 1.15, 1.25, 1.5];
+
+class MessageBubble extends ConsumerWidget {
+  const MessageBubble({required this.message, super.key});
+
   final ChatMessage message;
-  final AppSettings settings;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     if (message.role == MessageRole.user) {
       return Align(
         alignment: Alignment.centerRight,
@@ -33,6 +34,8 @@ class MessageBubble extends StatelessWidget {
       );
     }
     final response = message.response!;
+    final settings = ref.watch(settingsControllerProvider);
+    final controller = ref.read(settingsControllerProvider.notifier);
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 8),
       padding: const EdgeInsets.all(18),
@@ -82,11 +85,11 @@ class MessageBubble extends StatelessWidget {
                 icon: const Icon(Icons.volume_up_outlined),
                 tooltip: '播放（Phase 3）',
               ),
-              ...[0.75, 1.0, 1.25, 1.5].map(
+              ..._kBubbleSpeedStops.map(
                 (speed) => ChoiceChip(
                   label: Text('${speed}x'),
                   selected: settings.speechSpeed == speed,
-                  onSelected: (_) => settings.setSpeechSpeed(speed),
+                  onSelected: (_) => controller.setSpeechSpeed(speed),
                 ),
               ),
             ],

@@ -1,22 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../core/ai/conversation_engine.dart';
-import '../core/model/app_settings.dart';
 import '../features/home/home_page.dart';
 
-class LanguageCoachApp extends StatefulWidget {
+class LanguageCoachApp extends StatelessWidget {
   const LanguageCoachApp({super.key});
 
   @override
-  State<LanguageCoachApp> createState() => _LanguageCoachAppState();
-}
-
-class _LanguageCoachAppState extends State<LanguageCoachApp> {
-  final settings = AppSettings();
-  late final engine = ConversationEngine(settings: settings);
-
-  @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Language Coach',
@@ -28,7 +19,7 @@ class _LanguageCoachAppState extends State<LanguageCoachApp> {
         scaffoldBackgroundColor: const Color(0xfff7f5ef),
         useMaterial3: true,
       ),
-      home: HomePage(engine: engine, settings: settings),
+      home: const HomePage(),
     );
   }
 }

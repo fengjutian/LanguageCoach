@@ -1,4 +1,4 @@
-import '../model/app_settings.dart';
+import '../models/app_settings.dart';
 
 class TargetLanguageResolver {
   static const _aliases = <CoachLanguage, List<String>>{
