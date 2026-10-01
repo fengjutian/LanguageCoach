@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/ai/llm_event.dart';
 import '../../core/models/chat_models.dart';
+import '../../core/network/api_client.dart';
 import '../settings/application/settings_controller.dart';
 import 'application/conversation_providers.dart';
 import 'widgets/message_bubble.dart';
@@ -21,15 +23,16 @@ class _ChatPageState extends ConsumerState<ChatPage> {
   final scrollController = ScrollController();
   final messages = <ChatMessage>[];
   StreamSubscription<Object?>? nativeEventSubscription;
-  bool isLoading = false;
+  StreamSubscription<LlmEvent>? replySubscription;
+  bool isStreaming = false;
   bool isListening = false;
+
+  /// Last user input — kept so the stop / retry button can replay it.
+  String _lastUserInput = '';
 
   @override
   void initState() {
     super.initState();
-    // Subscribe to the bridge lazily so we capture the current instance on
-    // first frame — Riverpod overrides in tests swap this provider without
-    // touching widget state.
     final bridge = ref.read(nativeAiBridgeProvider);
     nativeEventSubscription = bridge.eventStream.listen(
       _handleNativeEvent,
@@ -40,8 +43,8 @@ class _ChatPageState extends ConsumerState<ChatPage> {
   @override
   void dispose() {
     nativeEventSubscription?.cancel();
+    replySubscription?.cancel();
     if (isListening) {
-      // The listener may have been disposed already (tests) — best effort.
       unawaited(ref.read(nativeAiBridgeProvider).cancelListening());
     }
     controller.dispose();
@@ -106,29 +109,133 @@ class _ChatPageState extends ConsumerState<ChatPage> {
   }
 
   Future<void> send() async {
+    if (isStreaming) return;
     final text = controller.text.trim();
-    if (text.isEmpty || isLoading) return;
+    if (text.isEmpty) return;
     controller.clear();
+    _lastUserInput = text;
+    final userMsg = ChatMessage(
+      id: 'u_${DateTime.now().microsecondsSinceEpoch}',
+      role: MessageRole.user,
+      sourceText: text,
+      createdAt: DateTime.now(),
+    );
+    final placeholder = ChatMessage(
+      id: 'a_${DateTime.now().microsecondsSinceEpoch}',
+      role: MessageRole.assistant,
+      createdAt: DateTime.now(),
+    );
     setState(() {
-      isLoading = true;
-      messages.add(
-        ChatMessage(
-          id: DateTime.now().microsecondsSinceEpoch.toString(),
-          role: MessageRole.user,
-          sourceText: text,
-          createdAt: DateTime.now(),
-        ),
-      );
+      messages
+        ..add(userMsg)
+        ..add(placeholder);
+      isStreaming = true;
     });
     _scrollDown();
-    try {
-      final engine = ref.read(conversationEngineProvider);
-      final response = await engine.reply(text);
-      if (mounted) setState(() => messages.add(response));
-    } finally {
-      if (mounted) setState(() => isLoading = false);
-      _scrollDown();
-    }
+    _beginReply(text, placeholder.id);
+  }
+
+  void _beginReply(String text, String placeholderId) {
+    replySubscription?.cancel();
+    final engine = ref.read(conversationEngineProvider);
+    final completer = Completer<void>();
+    replySubscription = engine.replyStream(text).listen(
+      (event) {
+        if (!mounted) return;
+        switch (event) {
+          case LlmEventDelta(:final text):
+            _appendDelta(placeholderId, text);
+          case LlmEventComplete(:final response, :final assistantMessage):
+            _finalizeMessage(
+                placeholderId,
+                assistantMessage.copyWith(
+                  response: response,
+                ));
+          case LlmEventError(:final error):
+            _renderError(placeholderId, error);
+        }
+      },
+      onError: (Object e) {
+        if (!mounted) return;
+        _renderError(
+            placeholderId, LlmError(LlmErrorKind.unknown, e.toString()));
+      },
+      onDone: () {
+        if (!mounted) return;
+        setState(() => isStreaming = false);
+        if (!completer.isCompleted) completer.complete();
+        _scrollDown();
+      },
+    );
+  }
+
+  void _appendDelta(String id, String delta) {
+    final idx = messages.indexWhere((m) => m.id == id);
+    if (idx < 0) return;
+    final current = messages[idx];
+    final response = current.response ??
+        CoachResponse(
+          intent: CoachIntent.conversation,
+          sourceLanguage: 'auto',
+          targetLanguage: '',
+          primary: '',
+          explanation: '',
+          sentences: const <CoachSentence>[],
+        );
+    final next = response.copyWith(primary: response.primary + delta);
+    setState(() {
+      messages[idx] = current.copyWith(response: next);
+    });
+  }
+
+  void _finalizeMessage(String id, ChatMessage finalized) {
+    final idx = messages.indexWhere((m) => m.id == id);
+    if (idx < 0) return;
+    setState(() {
+      messages[idx] = finalized.copyWith(id: id);
+    });
+  }
+
+  void _renderError(String id, LlmError error) {
+    final idx = messages.indexWhere((m) => m.id == id);
+    if (idx < 0) return;
+    setState(() {
+      messages[idx] = ChatMessage(
+        id: id,
+        role: MessageRole.error,
+        createdAt: DateTime.now(),
+        sourceText: _describe(error),
+      );
+    });
+  }
+
+  void stopReply() {
+    replySubscription?.cancel();
+    replySubscription = null;
+    if (!mounted) return;
+    // Keep the trailing placeholder as a partial answer; the composer swaps
+    // back to the send button now that isStreaming is false.
+    setState(() => isStreaming = false);
+    _scrollDown();
+  }
+
+  void retryLast() {
+    if (_lastUserInput.isEmpty || isStreaming) return;
+    controller.text = _lastUserInput;
+    send();
+  }
+
+  String _describe(LlmError error) {
+    return switch (error.kind) {
+      LlmErrorKind.unauthorized => '未授权：请检查 API Key',
+      LlmErrorKind.rateLimited => '请求过于频繁，请稍后再试',
+      LlmErrorKind.timeout => '请求超时，请检查网络',
+      LlmErrorKind.network => '网络不可用',
+      LlmErrorKind.format => '模型返回格式异常',
+      LlmErrorKind.server => '上游服务异常',
+      LlmErrorKind.cancelled => '已取消',
+      LlmErrorKind.unknown => '未知错误',
+    };
   }
 
   void _scrollDown() {
@@ -154,18 +261,16 @@ class _ChatPageState extends ConsumerState<ChatPage> {
               : ListView.builder(
                   controller: scrollController,
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
-                  itemCount: messages.length + (isLoading ? 1 : 0),
+                  itemCount: messages.length,
                   itemBuilder: (context, index) {
-                    if (index == messages.length) {
-                      return const Align(
-                        alignment: Alignment.centerLeft,
-                        child: Padding(
-                          padding: EdgeInsets.all(16),
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        ),
+                    final message = messages[index];
+                    if (message.role == MessageRole.error) {
+                      return _ErrorBubble(
+                        text: message.sourceText ?? '',
+                        onRetry: _lastUserInput.isEmpty ? null : retryLast,
                       );
                     }
-                    return MessageBubble(message: messages[index]);
+                    return MessageBubble(message: message);
                   },
                 ),
         ),
@@ -173,6 +278,7 @@ class _ChatPageState extends ConsumerState<ChatPage> {
           controller: controller,
           onSend: send,
           onToggleListening: toggleListening,
+          onStop: isStreaming ? stopReply : null,
           isListening: isListening,
         ),
       ],
@@ -256,11 +362,13 @@ class _Composer extends StatelessWidget {
     required this.controller,
     required this.onSend,
     required this.onToggleListening,
+    required this.onStop,
     required this.isListening,
   });
   final TextEditingController controller;
   final VoidCallback onSend;
   final VoidCallback onToggleListening;
+  final VoidCallback? onStop;
   final bool isListening;
 
   @override
@@ -289,13 +397,51 @@ class _Composer extends StatelessWidget {
                 ),
               ),
             ),
-            IconButton.filled(
-              onPressed: onSend,
-              icon: const Icon(Icons.arrow_upward_rounded),
-              tooltip: '发送',
-            ),
+            if (onStop != null)
+              IconButton(
+                onPressed: onStop,
+                icon: const Icon(Icons.stop_circle_outlined),
+                tooltip: '停止生成',
+              )
+            else
+              IconButton.filled(
+                onPressed: onSend,
+                icon: const Icon(Icons.arrow_upward_rounded),
+                tooltip: '发送',
+              ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _ErrorBubble extends StatelessWidget {
+  const _ErrorBubble({required this.text, this.onRetry});
+  final String text;
+  final VoidCallback? onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.errorContainer,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.error_outline,
+              color: Theme.of(context).colorScheme.onErrorContainer),
+          const SizedBox(width: 12),
+          Expanded(
+              child: Text(text,
+                  style: TextStyle(
+                      color: Theme.of(context).colorScheme.onErrorContainer))),
+          if (onRetry != null)
+            TextButton(onPressed: onRetry, child: const Text('重试')),
+        ],
       ),
     );
   }

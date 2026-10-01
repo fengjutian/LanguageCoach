@@ -7,7 +7,6 @@ import 'package:language_coach/core/ai/llm_event.dart';
 import 'package:language_coach/core/ai/llm_provider.dart';
 import 'package:language_coach/core/ai/structured_response_parser.dart';
 import 'package:language_coach/core/config/app_config.dart';
-import 'package:language_coach/core/models/app_settings.dart';
 import 'package:language_coach/core/models/chat_models.dart';
 import 'package:language_coach/core/network/api_client.dart';
 
@@ -17,15 +16,13 @@ import 'package:language_coach/core/network/api_client.dart';
 /// (base URL, model, label).
 abstract class OpenAiCompatibleProvider implements LlmProvider {
   OpenAiCompatibleProvider({
-    required ProviderEndpoint endpoint,
+    required this.endpoint,
     required this.id,
     required this.apiKeyResolver,
     required this.apiClient,
     StructuredResponseParser? parser,
-    String systemPrompt = _defaultSystemPrompt,
-  })  : endpoint = endpoint,
-        systemPrompt = systemPrompt,
-        parser = parser ?? const StructuredResponseParser();
+    this.systemPrompt = _defaultSystemPrompt,
+  }) : parser = parser ?? const StructuredResponseParser();
 
   final ProviderEndpoint endpoint;
   @override
@@ -164,7 +161,10 @@ JSON object (no prose, no markdown fences) matching this schema:
     final content = m.role == MessageRole.user
         ? m.sourceText ?? ''
         : m.response?.primary ?? '';
-    return {'role': m.role == MessageRole.user ? 'user' : 'assistant', 'content': content};
+    return {
+      'role': m.role == MessageRole.user ? 'user' : 'assistant',
+      'content': content
+    };
   }
 
   Iterable<_SseEvent> _splitSseEvents(String chunk) sync* {

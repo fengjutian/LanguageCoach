@@ -19,7 +19,7 @@ enum CoachIntent {
   practice,
 }
 
-enum MessageRole { user, assistant }
+enum MessageRole { user, assistant, error }
 
 /// One sentence inside a [CoachResponse]. Stable across conversation turns so
 /// the UI can keep references after a re-render or audio cache hit.
@@ -73,6 +73,28 @@ class CoachResponse {
   final String explanation;
   final List<CoachSentence> sentences;
   final List<String> keywords;
+
+  CoachResponse copyWith({
+    CoachIntent? intent,
+    String? sourceLanguage,
+    String? targetLanguage,
+    String? primary,
+    List<String>? alternatives,
+    String? explanation,
+    List<CoachSentence>? sentences,
+    List<String>? keywords,
+  }) {
+    return CoachResponse(
+      intent: intent ?? this.intent,
+      sourceLanguage: sourceLanguage ?? this.sourceLanguage,
+      targetLanguage: targetLanguage ?? this.targetLanguage,
+      primary: primary ?? this.primary,
+      alternatives: alternatives ?? this.alternatives,
+      explanation: explanation ?? this.explanation,
+      sentences: sentences ?? this.sentences,
+      keywords: keywords ?? this.keywords,
+    );
+  }
 
   factory CoachResponse.fromJson(Map<Object?, Object?> raw) {
     final intentRaw = raw['intent'];
@@ -149,6 +171,24 @@ class ChatMessage {
   final String? sourceText;
   final CoachResponse? response;
   final String? model;
+
+  ChatMessage copyWith({
+    String? id,
+    MessageRole? role,
+    DateTime? createdAt,
+    String? sourceText,
+    CoachResponse? response,
+    String? model,
+  }) {
+    return ChatMessage(
+      id: id ?? this.id,
+      role: role ?? this.role,
+      createdAt: createdAt ?? this.createdAt,
+      sourceText: sourceText ?? this.sourceText,
+      response: response ?? this.response,
+      model: model ?? this.model,
+    );
+  }
 
   factory ChatMessage.fromJson(Map<Object?, Object?> raw) {
     final roleRaw = raw['role']?.toString() ?? MessageRole.user.name;

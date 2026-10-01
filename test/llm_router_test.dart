@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:language_coach/core/ai/llm_event.dart';
 import 'package:language_coach/core/ai/llm_provider.dart';
 import 'package:language_coach/core/ai/llm_router.dart';
 import 'package:language_coach/core/models/app_settings.dart';
@@ -9,8 +10,35 @@ class _StubProvider implements LlmProvider {
   @override
   final String id;
   @override
-  Future<CoachResponse> generate(CoachRequest request) async =>
-      DemoLlmProvider(id).generate(request);
+  Stream<LlmEvent> generateStream(
+    CoachRequest request,
+    List<ChatMessage> context,
+  ) async* {
+    yield LlmEventComplete(
+      CoachResponse(
+        intent: request.intent,
+        sourceLanguage: 'auto',
+        targetLanguage: request.targetLanguage.code,
+        primary: 'ok',
+        explanation: '',
+        sentences: const <CoachSentence>[],
+      ),
+      ChatMessage(
+        id: 'm',
+        role: MessageRole.assistant,
+        createdAt: DateTime.now(),
+        response: CoachResponse(
+          intent: request.intent,
+          sourceLanguage: 'auto',
+          targetLanguage: request.targetLanguage.code,
+          primary: 'ok',
+          explanation: '',
+          sentences: const <CoachSentence>[],
+        ),
+        model: id,
+      ),
+    );
+  }
 }
 
 void main() {
@@ -47,5 +75,23 @@ void main() {
     expect(router.resolve(AiProvider.auto, CoachIntent.expressionHelp).id,
         'MiniMax');
     expect(router.resolve(AiProvider.auto, CoachIntent.roleplay).id, 'MiniMax');
+  });
+
+  test('local provider surfaces a clear error instead of mock data', () async {
+    final local = const LocalModelNotInstalledProvider();
+    final events = <LlmEvent>[];
+    await for (final e in local.generateStream(
+      const CoachRequest(
+        text: 'ping',
+        targetLanguage: CoachLanguage.english,
+        intent: CoachIntent.conversation,
+      ),
+      const <ChatMessage>[],
+    )) {
+      events.add(e);
+    }
+    expect(events, hasLength(1));
+    final err = events.single as LlmEventError;
+    expect(err.error.message, contains('本地模型未安装'));
   });
 }

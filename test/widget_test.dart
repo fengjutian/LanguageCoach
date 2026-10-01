@@ -17,15 +17,21 @@ ProviderContainer _containerFor(WidgetTester tester, Finder finder) =>
 
 void main() {
   testWidgets('SettingsPage renders and reflects defaults', (tester) async {
+    // Use a tall viewport so all SliverList children can be measured in a
+    // single frame — the layout uses SliverAppBar.large which otherwise
+    // claims most of the default 600px viewport.
+    tester.view.physicalSize = const Size(800, 2400);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
     await tester.pumpWidget(_wrap(const SettingsPage()));
     expect(find.text('设置'), findsAtLeastNWidgets(1));
-    // The SliverAppBar.large consumes most of the viewport, so only the
-    // top-most list items are rendered in this single-frame test. The
-    // remaining sections are covered by the controller-propagation test
-    // below which mutates state directly without needing them on screen.
     expect(find.text('首选语言'), findsOneWidget);
     expect(find.text('Provider'), findsOneWidget);
-    expect(find.byType(SwitchListTile), findsAtLeastNWidgets(1));
+    expect(find.byType(SwitchListTile), findsAtLeastNWidgets(2));
+    expect(find.text('API Keys'), findsOneWidget);
   });
 
   testWidgets('Settings controller propagates to settings page',

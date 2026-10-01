@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import '../models/app_settings.dart';
 import '../models/chat_models.dart';
 
 /// Parses the accumulated raw text emitted by an LLM streaming response into

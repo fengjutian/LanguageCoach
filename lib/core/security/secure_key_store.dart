@@ -14,8 +14,7 @@ class SecureKeyStore {
 
   final FlutterSecureStorage _storage;
 
-  Future<String?> read(ApiKeySlot slot) =>
-      _storage.read(key: _keyFor(slot));
+  Future<String?> read(ApiKeySlot slot) => _storage.read(key: _keyFor(slot));
 
   Future<void> write(ApiKeySlot slot, String value) async {
     final trimmed = value.trim();
@@ -26,8 +25,7 @@ class SecureKeyStore {
     await _storage.write(key: _keyFor(slot), value: trimmed);
   }
 
-  Future<void> delete(ApiKeySlot slot) =>
-      _storage.delete(key: _keyFor(slot));
+  Future<void> delete(ApiKeySlot slot) => _storage.delete(key: _keyFor(slot));
 
   /// Returns a UI-safe preview of the key (last 4 chars only) or `null`
   /// when no key is stored. Never returns the full secret.

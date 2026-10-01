@@ -3,7 +3,16 @@ import 'package:dio/dio.dart';
 /// Classifies network outcomes into a small set the UI layer can render
 /// without leaking low-level transport details. Anything else falls through
 /// as [LlmErrorKind.unknown].
-enum LlmErrorKind { unauthorized, rateLimited, server, timeout, network, format, cancelled, unknown }
+enum LlmErrorKind {
+  unauthorized,
+  rateLimited,
+  server,
+  timeout,
+  network,
+  format,
+  cancelled,
+  unknown
+}
 
 /// Stable error envelope for LLM calls. Includes an [httpStatus] (when
 /// available) and a [message] safe for diagnostics — never includes the
@@ -45,16 +54,17 @@ class ApiClient {
     required String apiKey,
     Map<String, Object?>? queryParameters,
   }) {
-    return _safeSend(() => _dio.post(
-                url,
-                data: body,
-                queryParameters: queryParameters,
-                options: Options(
-                  headers: {'Authorization': 'Bearer $apiKey'},
-                  responseType: ResponseType.stream,
-                ),
-              ),
-      );
+    return _safeSend(
+      () => _dio.post(
+        url,
+        data: body,
+        queryParameters: queryParameters,
+        options: Options(
+          headers: {'Authorization': 'Bearer $apiKey'},
+          responseType: ResponseType.stream,
+        ),
+      ),
+    );
   }
 
   /// SSE-friendly variant that streams bytes back through Dio's stream
@@ -66,19 +76,20 @@ class ApiClient {
     required String apiKey,
     Map<String, Object?>? queryParameters,
   }) async {
-    return _safeSend(() => _dio.post<dynamic>(
-              url,
-              data: body,
-              queryParameters: queryParameters,
-              options: Options(
-                headers: {
-                  'Authorization': 'Bearer $apiKey',
-                  'Accept': 'text/event-stream',
-                },
-                responseType: ResponseType.stream,
-              ),
-            ),
-        );
+    return _safeSend(
+      () => _dio.post<dynamic>(
+        url,
+        data: body,
+        queryParameters: queryParameters,
+        options: Options(
+          headers: {
+            'Authorization': 'Bearer $apiKey',
+            'Accept': 'text/event-stream',
+          },
+          responseType: ResponseType.stream,
+        ),
+      ),
+    );
   }
 
   Future<Response<dynamic>> _safeSend(
@@ -105,17 +116,22 @@ class ApiClient {
       case DioExceptionType.badResponse:
         final status = e.response?.statusCode ?? -1;
         if (status == 401) {
-          return LlmError(LlmErrorKind.unauthorized, 'invalid api key', httpStatus: 401);
+          return LlmError(LlmErrorKind.unauthorized, 'invalid api key',
+              httpStatus: 401);
         }
         if (status == 429) {
-          return LlmError(LlmErrorKind.rateLimited, 'rate limited', httpStatus: 429);
+          return LlmError(LlmErrorKind.rateLimited, 'rate limited',
+              httpStatus: 429);
         }
         if (status >= 500) {
-          return LlmError(LlmErrorKind.server, 'upstream error', httpStatus: status);
+          return LlmError(LlmErrorKind.server, 'upstream error',
+              httpStatus: status);
         }
-        return LlmError(LlmErrorKind.unknown, 'http $status', httpStatus: status);
+        return LlmError(LlmErrorKind.unknown, 'http $status',
+            httpStatus: status);
       case DioExceptionType.badCertificate:
       case DioExceptionType.unknown:
+      case DioExceptionType.transformTimeout:
         return const LlmError(LlmErrorKind.network, 'network unavailable');
     }
   }
