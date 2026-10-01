@@ -1,5 +1,5 @@
-import '../model/app_settings.dart';
-import '../model/chat_models.dart';
+import '../models/app_settings.dart';
+import '../models/chat_models.dart';
 
 class CoachRequest {
   const CoachRequest({
@@ -12,11 +12,19 @@ class CoachRequest {
   final CoachIntent intent;
 }
 
+/// Provider contract used by [ConversationEngine]. The current interface is
+/// deliberately small; P0-2 widens this to a streaming `Stream<LlmEvent>` so
+/// the chat UI can render partial text. Real network providers (MiniMax,
+/// DeepSeek) and the local Qwen provider all sit behind this boundary.
 abstract interface class LlmProvider {
   String get id;
+
   Future<CoachResponse> generate(CoachRequest request);
 }
 
+/// Fallback provider used until P0-2 wires real network calls. It returns
+/// a single canned sentence per language so the rest of the chat surface
+/// stays exercisable without external credentials.
 class DemoLlmProvider implements LlmProvider {
   const DemoLlmProvider(this.id);
   @override
@@ -44,7 +52,7 @@ class DemoLlmProvider implements LlmProvider {
       primary: sample,
       alternatives: request.targetLanguage == CoachLanguage.english
           ? const ["It's rainy today."]
-          : const [],
+          : const <String>[],
       explanation: '这是符合目标语言日常习惯的自然表达。接入真实模型后，解释会结合输入和上下文生成。',
       sentences: [CoachSentence(id: 's1', text: sample)],
       keywords: const ['rain'],

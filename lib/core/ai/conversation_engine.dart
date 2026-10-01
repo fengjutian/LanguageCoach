@@ -1,13 +1,24 @@
-import '../language/target_language_resolver.dart';
-import '../model/app_settings.dart';
-import '../model/chat_models.dart';
-import 'llm_provider.dart';
+import 'package:language_coach/core/ai/llm_provider.dart';
+import 'package:language_coach/core/ai/llm_router.dart';
+import 'package:language_coach/core/language/target_language_resolver.dart';
+import 'package:language_coach/core/models/app_settings.dart';
+import 'package:language_coach/core/models/chat_models.dart';
 
+/// Pure orchestrator: target-language resolution -> intent detection -> router
+/// selection -> LLM call -> wrap result. Engine itself never touches
+/// concrete provider wiring, which keeps widget tests simple (inject a fake
+/// router / provider) and lets P0-2 swap in real network providers without
+/// touching this file.
 class ConversationEngine {
-  ConversationEngine({required this.settings});
+  ConversationEngine({
+    required this.settings,
+    required this.router,
+    TargetLanguageResolver? resolver,
+  }) : _languageResolver = resolver ?? TargetLanguageResolver();
 
   final AppSettings settings;
-  final _languageResolver = TargetLanguageResolver();
+  final LlmRouter router;
+  final TargetLanguageResolver _languageResolver;
 
   CoachIntent detectIntent(String input) {
     final text = input.toLowerCase();
@@ -31,7 +42,7 @@ class ConversationEngine {
   Future<ChatMessage> reply(String input) async {
     final target = _languageResolver.resolve(input, settings.preferredLanguage);
     final intent = detectIntent(input);
-    final provider = _providerFor(intent);
+    final provider = router.resolve(settings.provider, intent);
     final response = await provider.generate(
       CoachRequest(text: input, targetLanguage: target, intent: intent),
     );
@@ -42,20 +53,5 @@ class ConversationEngine {
       response: response,
       model: provider.id,
     );
-  }
-
-  LlmProvider _providerFor(CoachIntent intent) {
-    final selected = settings.provider == AiProvider.auto
-        ? (intent == CoachIntent.grammarQuestion ||
-                intent == CoachIntent.correction
-            ? AiProvider.deepSeek
-            : AiProvider.miniMax)
-        : settings.provider;
-    return DemoLlmProvider(switch (selected) {
-      AiProvider.auto => 'Auto',
-      AiProvider.miniMax => 'MiniMax (Demo)',
-      AiProvider.deepSeek => 'DeepSeek (Demo)',
-      AiProvider.localQwen => 'Qwen3 0.6B (Demo)',
-    });
   }
 }

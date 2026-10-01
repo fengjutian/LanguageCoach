@@ -10,11 +10,36 @@ dependencies:
   flutter:
     sdk: flutter
 
+  # Networking (P0-2 will use; declared early so P0-1 interfaces can sit on it)
+  dio: ^5.7.0
+
+  # State management (P0-4 migration target)
+  flutter_riverpod: ^2.5.1
+
+  # Immutable models + JSON (declared now so P0-1 can wire serialization)
+  freezed_annotation: ^2.4.4
+  json_annotation: ^4.9.0
+
+  # Local persistence (P0-3 will use)
+  path: ^1.9.0
+  path_provider: ^2.1.4
+  sqflite: ^2.3.3
+
+  # Secure storage for API keys (P0-2)
+  flutter_secure_storage: ^9.2.2
+
+  # Stable message identifiers
+  uuid: ^4.5.1
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^5.0.0
 
+  # Code generation for freezed + json_serializable
+  build_runner: ^2.4.13
+  freezed: ^2.5.7
+  json_serializable: ^6.8.0
+
 flutter:
   uses-material-design: true
-
