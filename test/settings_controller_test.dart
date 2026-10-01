@@ -52,8 +52,8 @@ void main() {
 
   test('hydrateFromJson keeps defensive defaults', () {
     container.read(settingsControllerProvider.notifier).hydrateFromJson(
-          <String, Object?>{'preferredLanguage': 'klingon'},
-        );
+      <String, Object?>{'preferredLanguage': 'klingon'},
+    );
     final s = container.read(settingsControllerProvider);
     expect(s.preferredLanguage, CoachLanguage.english);
   });

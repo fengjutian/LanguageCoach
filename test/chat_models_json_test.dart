@@ -123,7 +123,9 @@ void main() {
         'role': 'user',
         'createdAt': 'not-a-date',
       });
-      expect(msg.createdAt.isBefore(DateTime.now().add(const Duration(seconds: 5))),
+      expect(
+          msg.createdAt
+              .isBefore(DateTime.now().add(const Duration(seconds: 5))),
           isTrue);
     });
   });

@@ -62,7 +62,8 @@ class _ChatPageState extends ConsumerState<ChatPage> {
         return;
       }
       await ref.read(nativeAiBridgeProvider).startListening(
-            language: ref.read(settingsControllerProvider).preferredLanguage.code,
+            language:
+                ref.read(settingsControllerProvider).preferredLanguage.code,
           );
     } on PlatformException catch (error) {
       _showVoiceError(error.message ?? '无法启动语音识别');

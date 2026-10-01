@@ -103,9 +103,7 @@ class AppSettings {
       String() => double.tryParse(speedRaw) ?? 1.0,
       _ => 1.0,
     };
-    final speed = allowedSpeechSpeeds.contains(speedParsed)
-        ? speedParsed
-        : 1.0;
+    final speed = allowedSpeechSpeeds.contains(speedParsed) ? speedParsed : 1.0;
 
     return AppSettings(
       preferredLanguage: language,

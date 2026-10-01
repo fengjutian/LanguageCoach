@@ -167,8 +167,7 @@ class ChatMessage {
     }
 
     return ChatMessage(
-      id: raw['id']?.toString() ??
-          'm_${DateTime.now().microsecondsSinceEpoch}',
+      id: raw['id']?.toString() ?? 'm_${DateTime.now().microsecondsSinceEpoch}',
       role: role,
       createdAt: createdAt,
       sourceText: raw['sourceText']?.toString(),

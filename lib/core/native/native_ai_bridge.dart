@@ -36,8 +36,7 @@ class DefaultBridge implements NativeAiBridge {
 
   static const MethodChannel _commands =
       MethodChannel('language_coach/ai_commands');
-  static const EventChannel _events =
-      EventChannel('language_coach/ai_events');
+  static const EventChannel _events = EventChannel('language_coach/ai_events');
 
   @override
   Stream<Object?> get eventStream => _events.receiveBroadcastStream();

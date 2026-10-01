@@ -35,8 +35,8 @@ void main() {
   test('auto routes grammar / correction / explanation to DeepSeek', () {
     expect(router.resolve(AiProvider.auto, CoachIntent.grammarQuestion).id,
         'DeepSeek');
-    expect(router.resolve(AiProvider.auto, CoachIntent.correction).id,
-        'DeepSeek');
+    expect(
+        router.resolve(AiProvider.auto, CoachIntent.correction).id, 'DeepSeek');
     expect(router.resolve(AiProvider.auto, CoachIntent.explanation).id,
         'DeepSeek');
   });
