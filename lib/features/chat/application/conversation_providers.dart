@@ -1,19 +1,43 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/ai/conversation_engine.dart';
-import '../../../core/ai/llm_provider.dart';
 import '../../../core/ai/llm_router.dart';
+import '../../../core/ai/minimax_provider.dart';
+import '../../../core/config/app_config.dart';
 import '../../../core/native/native_ai_bridge.dart';
+import '../../../core/network/api_client.dart';
+import '../../../core/security/secure_key_store.dart';
 import '../../settings/application/settings_controller.dart';
 
-/// In-process router that wires the [LlmProvider] implementations into the
-/// [ConversationEngine]. P0-2 replaces the [DemoLlmProvider] instances with
-/// real network providers; the route resolution logic is unchanged.
+final appConfigProvider = Provider<AppConfig>((ref) {
+  return AppConfig.defaultAppConfig;
+});
+
+final apiClientProvider = Provider<ApiClient>((ref) => ApiClient());
+
+final secureKeyStoreProvider = Provider<SecureKeyStore>((ref) {
+  return SecureKeyStore();
+});
+
+/// In-process router. Real network providers are injected here; tests swap
+/// individual providers via `llmRouterProvider.overrideWith(...)`.
 final llmRouterProvider = Provider<LlmRouter>((ref) {
+  final config = ref.watch(appConfigProvider);
+  final apiClient = ref.watch(apiClientProvider);
+  final keyStore = ref.watch(secureKeyStoreProvider);
+
   return LlmRouter(
-    manualMiniMax: const DemoLlmProvider('MiniMax (Demo)'),
-    manualDeepSeek: const DemoLlmProvider('DeepSeek (Demo)'),
-    localQwen: const DemoLlmProvider('Qwen3 0.6B (Demo)'),
+    manualMiniMax: MiniMaxProvider(
+      endpoint: config.miniMax,
+      apiClient: apiClient,
+      apiKeyResolver: () => keyStore.read(ApiKeySlot.miniMax),
+    ),
+    manualDeepSeek: DeepSeekProvider(
+      endpoint: config.deepSeek,
+      apiClient: apiClient,
+      apiKeyResolver: () => keyStore.read(ApiKeySlot.deepSeek),
+    ),
+    localQwen: const LocalModelNotInstalledProvider(),
   );
 });
 

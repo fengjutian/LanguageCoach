@@ -1,0 +1,237 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:developer' as developer;
+
+import 'package:dio/dio.dart';
+import 'package:language_coach/core/ai/llm_event.dart';
+import 'package:language_coach/core/ai/llm_provider.dart';
+import 'package:language_coach/core/ai/structured_response_parser.dart';
+import 'package:language_coach/core/config/app_config.dart';
+import 'package:language_coach/core/models/app_settings.dart';
+import 'package:language_coach/core/models/chat_models.dart';
+import 'package:language_coach/core/network/api_client.dart';
+
+/// Shared implementation for OpenAI-compatible `/chat/completions` endpoints
+/// with Server-Sent-Events (SSE) streaming. Both [MiniMaxProvider] and
+/// [DeepSeekProvider] subclass this and only differ in their [Endpoint]
+/// (base URL, model, label).
+abstract class OpenAiCompatibleProvider implements LlmProvider {
+  OpenAiCompatibleProvider({
+    required ProviderEndpoint endpoint,
+    required this.id,
+    required this.apiKeyResolver,
+    required this.apiClient,
+    StructuredResponseParser? parser,
+    String systemPrompt = _defaultSystemPrompt,
+  })  : endpoint = endpoint,
+        systemPrompt = systemPrompt,
+        parser = parser ?? const StructuredResponseParser();
+
+  final ProviderEndpoint endpoint;
+  @override
+  final String id;
+
+  /// Returns the API key to use for this request. Concrete providers wrap a
+  /// [SecureKeyStore] (or a test fake) — the key is read lazily so callers
+  /// can update storage between streams.
+  final Future<String?> Function() apiKeyResolver;
+
+  final ApiClient apiClient;
+  final StructuredResponseParser parser;
+  final String systemPrompt;
+
+  static const String _defaultSystemPrompt = '''
+You are "LanguageCoach", a multilingual tutor. Always respond with a single
+JSON object (no prose, no markdown fences) matching this schema:
+
+{
+  "intent": "translation | conversation | grammarQuestion | correction | explanation | expressionHelp | roleplay | practice | vocabulary | pronunciation",
+  "sourceLanguage": "<iso code, or 'auto'>",
+  "targetLanguage": "<iso code>",
+  "primary": "<main answer in the target language>",
+  "alternatives": ["<other acceptable answers>"],
+  "explanation": "<short explanation in the user's input language>",
+  "sentences": [{"id": "<stable id>", "text": "<one sentence>"}],
+  "keywords": ["<key vocabulary>"]
+}
+''';
+
+  @override
+  Stream<LlmEvent> generateStream(
+    CoachRequest request,
+    List<ChatMessage> context,
+  ) async* {
+    final key = await apiKeyResolver();
+    if (key == null || key.isEmpty) {
+      yield LlmEventError(const LlmError(
+        LlmErrorKind.unauthorized,
+        'API key not configured',
+      ));
+      return;
+    }
+
+    final messages = <Map<String, Object?>>[
+      {'role': 'system', 'content': systemPrompt},
+      ...context.map(_toOpenAiMessage),
+      {'role': 'user', 'content': request.text},
+    ];
+
+    final body = <String, Object?>{
+      'model': endpoint.model,
+      'messages': messages,
+      'stream': true,
+    };
+
+    final url = '${endpoint.baseUrl}/chat/completions';
+
+    Response<dynamic>? response;
+    try {
+      response = await apiClient.postStream(
+        url: url,
+        body: body,
+        apiKey: key,
+      );
+    } on LlmError catch (e) {
+      yield LlmEventError(e);
+      return;
+    } catch (e) {
+      yield LlmEventError(LlmError(LlmErrorKind.unknown, e.toString()));
+      return;
+    }
+
+    final stream = response.data;
+    if (stream is! Stream<List<int>>) {
+      yield LlmEventError(const LlmError(
+        LlmErrorKind.format,
+        'response body was not a stream',
+      ));
+      return;
+    }
+
+    final buffer = StringBuffer();
+    var emittedError = false;
+
+    try {
+      await for (final chunk in stream.transform(utf8.decoder)) {
+        for (final event in _splitSseEvents(chunk)) {
+          if (event.data.isEmpty) continue;
+          if (event.data == '[DONE]') {
+            break;
+          }
+          final delta = _extractDelta(event.data);
+          if (delta != null && delta.isNotEmpty) {
+            buffer.write(delta);
+            yield LlmEventDelta(delta);
+          }
+          final errMsg = _extractError(event.data);
+          if (errMsg != null) {
+            emittedError = true;
+            yield LlmEventError(LlmError(
+              LlmErrorKind.unknown,
+              errMsg,
+              httpStatus: event.status,
+            ));
+            break;
+          }
+        }
+      }
+    } on LlmError catch (e) {
+      yield LlmEventError(e);
+      return;
+    } catch (e) {
+      yield LlmEventError(LlmError(LlmErrorKind.unknown, e.toString()));
+      return;
+    }
+
+    if (emittedError) return;
+
+    final response0 = parser.parse(
+      buffer.toString(),
+      intent: request.intent,
+      targetLanguage: request.targetLanguage,
+    );
+    final message = ChatMessage(
+      id: DateTime.now().microsecondsSinceEpoch.toString(),
+      role: MessageRole.assistant,
+      createdAt: DateTime.now(),
+      response: response0,
+      model: id,
+    );
+    yield LlmEventComplete(response0, message);
+  }
+
+  Map<String, Object?> _toOpenAiMessage(ChatMessage m) {
+    final content = m.role == MessageRole.user
+        ? m.sourceText ?? ''
+        : m.response?.primary ?? '';
+    return {'role': m.role == MessageRole.user ? 'user' : 'assistant', 'content': content};
+  }
+
+  Iterable<_SseEvent> _splitSseEvents(String chunk) sync* {
+    final lines = const LineSplitter().convert(chunk);
+    String? data;
+    int? status;
+    for (final line in lines) {
+      if (line.startsWith('data:')) {
+        data = line.substring(5).trimLeft();
+      } else if (line.startsWith('status:')) {
+        status = int.tryParse(line.substring(7).trim());
+      } else if (line.isEmpty && data != null) {
+        yield _SseEvent(data, status);
+        data = null;
+        status = null;
+      }
+    }
+    if (data != null) {
+      yield _SseEvent(data, status);
+    }
+  }
+
+  String? _extractDelta(String data) {
+    try {
+      final decoded = json.decode(data);
+      if (decoded is Map) {
+        final choices = decoded['choices'];
+        if (choices is List && choices.isNotEmpty) {
+          final first = choices.first;
+          if (first is Map) {
+            final delta = first['delta'];
+            if (delta is Map) {
+              final content = delta['content'];
+              if (content is String) return content;
+            }
+            // Some servers (DeepSeek) emit `text` rather than `delta.content`
+            final text = first['text'];
+            if (text is String) return text;
+          }
+        }
+      }
+    } catch (e) {
+      developer.log('sse parse failure',
+          name: 'OpenAiCompatibleProvider', error: e);
+    }
+    return null;
+  }
+
+  String? _extractError(String data) {
+    try {
+      final decoded = json.decode(data);
+      if (decoded is Map) {
+        final error = decoded['error'];
+        if (error is Map) {
+          final message = error['message'];
+          if (message is String) return message;
+        }
+      }
+    } catch (_) {
+      // non-JSON chunk — ignore
+    }
+    return null;
+  }
+}
+
+class _SseEvent {
+  const _SseEvent(this.data, this.status);
+  final String data;
+  final int? status;
+}

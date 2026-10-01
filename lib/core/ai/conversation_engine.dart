@@ -1,14 +1,12 @@
+import 'package:language_coach/core/ai/llm_event.dart';
 import 'package:language_coach/core/ai/llm_provider.dart';
 import 'package:language_coach/core/ai/llm_router.dart';
 import 'package:language_coach/core/language/target_language_resolver.dart';
 import 'package:language_coach/core/models/app_settings.dart';
 import 'package:language_coach/core/models/chat_models.dart';
 
-/// Pure orchestrator: target-language resolution -> intent detection -> router
-/// selection -> LLM call -> wrap result. Engine itself never touches
-/// concrete provider wiring, which keeps widget tests simple (inject a fake
-/// router / provider) and lets P0-2 swap in real network providers without
-/// touching this file.
+/// Pure orchestrator: target-language resolution -> intent detection ->
+/// router selection -> provider call -> wrap as [LlmEvent].
 class ConversationEngine {
   ConversationEngine({
     required this.settings,
@@ -39,19 +37,45 @@ class ConversationEngine {
     return CoachIntent.conversation;
   }
 
-  Future<ChatMessage> reply(String input) async {
+  /// Resolves target + intent, picks a provider through [router], and yields
+  /// [LlmEvent]s the chat UI can stream directly. The engine itself never
+  /// touches concrete provider wiring; tests inject a fake by overriding
+  /// [llmRouterProvider].
+  Stream<LlmEvent> replyStream(
+    String input, {
+    List<ChatMessage> context = const <ChatMessage>[],
+  }) async* {
     final target = _languageResolver.resolve(input, settings.preferredLanguage);
     final intent = detectIntent(input);
     final provider = router.resolve(settings.provider, intent);
-    final response = await provider.generate(
-      CoachRequest(text: input, targetLanguage: target, intent: intent),
+    final request = CoachRequest(
+      text: input,
+      targetLanguage: target,
+      intent: intent,
     );
-    return ChatMessage(
-      id: DateTime.now().microsecondsSinceEpoch.toString(),
-      role: MessageRole.assistant,
-      createdAt: DateTime.now(),
-      response: response,
-      model: provider.id,
-    );
+
+    final id = DateTime.now().microsecondsSinceEpoch.toString();
+    DateTime? createdAt;
+
+    await for (final event in provider.generateStream(request, context)) {
+      switch (event) {
+        case LlmEventDelta():
+          yield event;
+        case LlmEventComplete(:final response):
+          createdAt ??= DateTime.now();
+          yield LlmEventComplete(
+            response,
+            ChatMessage(
+              id: id,
+              role: MessageRole.assistant,
+              createdAt: createdAt,
+              response: response,
+              model: provider.id,
+            ),
+          );
+        case LlmEventError():
+          yield event;
+      }
+    }
   }
 }

@@ -1,6 +1,8 @@
+import 'package:language_coach/core/ai/llm_event.dart';
 import 'package:language_coach/core/ai/llm_provider.dart';
 import 'package:language_coach/core/models/app_settings.dart';
 import 'package:language_coach/core/models/chat_models.dart';
+import 'package:language_coach/core/network/api_client.dart';
 
 /// Picks the [LlmProvider] for a given intent under the user's chosen routing
 /// policy. Kept as a dedicated object so it can be replaced (e.g. with a real
@@ -40,5 +42,25 @@ class LlmRouter {
         }
         return _manualMiniMax;
     }
+  }
+}
+
+/// Stub provider used until P1-6 wires real llama.cpp. Always emits a
+/// transparent "model not installed" error so the chat UI can render a
+/// localised retry card without pretending the call succeeded.
+class LocalModelNotInstalledProvider implements LlmProvider {
+  const LocalModelNotInstalledProvider([this.id = 'Qwen3 (Local)']);
+  @override
+  final String id;
+
+  @override
+  Stream<LlmEvent> generateStream(
+    CoachRequest request,
+    List<ChatMessage> context,
+  ) async* {
+    yield LlmEventError(const LlmError(
+      LlmErrorKind.format,
+      '本地模型未安装。请前往设置页下载 Qwen3 0.6B。',
+    ));
   }
 }

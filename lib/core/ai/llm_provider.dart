@@ -1,5 +1,6 @@
 import '../models/app_settings.dart';
 import '../models/chat_models.dart';
+import 'llm_event.dart';
 
 class CoachRequest {
   const CoachRequest({
@@ -13,26 +14,32 @@ class CoachRequest {
 }
 
 /// Provider contract used by [ConversationEngine]. The current interface is
-/// deliberately small; P0-2 widens this to a streaming `Stream<LlmEvent>` so
-/// the chat UI can render partial text. Real network providers (MiniMax,
+/// deliberately streaming so the chat UI can render partial text, support
+/// stop / cancel, and surface error cards. Real network providers (MiniMax,
 /// DeepSeek) and the local Qwen provider all sit behind this boundary.
 abstract interface class LlmProvider {
   String get id;
 
-  Future<CoachResponse> generate(CoachRequest request);
+  Stream<LlmEvent> generateStream(
+    CoachRequest request,
+    List<ChatMessage> context,
+  );
 }
 
-/// Fallback provider used until P0-2 wires real network calls. It returns
-/// a single canned sentence per language so the rest of the chat surface
-/// stays exercisable without external credentials.
+/// Fallback provider used until real keys are configured. Returns a single
+/// canned sentence per language so the chat surface stays exercisable
+/// without external credentials.
 class DemoLlmProvider implements LlmProvider {
   const DemoLlmProvider(this.id);
   @override
   final String id;
 
   @override
-  Future<CoachResponse> generate(CoachRequest request) async {
-    await Future<void>.delayed(const Duration(milliseconds: 650));
+  Stream<LlmEvent> generateStream(
+    CoachRequest request,
+    List<ChatMessage> context,
+  ) async* {
+    await Future<void>.delayed(const Duration(milliseconds: 250));
     final sample = switch (request.targetLanguage) {
       CoachLanguage.english => "It's raining today.",
       CoachLanguage.japanese => '今日は雨が降っています。',
@@ -45,17 +52,39 @@ class DemoLlmProvider implements LlmProvider {
       CoachLanguage.russian => 'Сегодня идёт дождь.',
       CoachLanguage.portuguese => 'Está chovendo hoje.',
     };
-    return CoachResponse(
-      intent: request.intent,
-      sourceLanguage: 'auto',
-      targetLanguage: request.targetLanguage.code,
-      primary: sample,
-      alternatives: request.targetLanguage == CoachLanguage.english
-          ? const ["It's rainy today."]
-          : const <String>[],
-      explanation: '这是符合目标语言日常习惯的自然表达。接入真实模型后，解释会结合输入和上下文生成。',
-      sentences: [CoachSentence(id: 's1', text: sample)],
-      keywords: const ['rain'],
+    yield LlmEventDelta(sample);
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+    yield LlmEventComplete(
+      CoachResponse(
+        intent: request.intent,
+        sourceLanguage: 'auto',
+        targetLanguage: request.targetLanguage.code,
+        primary: sample,
+        alternatives: request.targetLanguage == CoachLanguage.english
+            ? const ["It's rainy today."]
+            : const <String>[],
+        explanation: '这是符合目标语言日常习惯的自然表达。接入真实模型后，解释会结合输入和上下文生成。',
+        sentences: [CoachSentence(id: 's1', text: sample)],
+        keywords: const ['rain'],
+      ),
+      ChatMessage(
+        id: DateTime.now().microsecondsSinceEpoch.toString(),
+        role: MessageRole.assistant,
+        createdAt: DateTime.now(),
+        response: CoachResponse(
+          intent: request.intent,
+          sourceLanguage: 'auto',
+          targetLanguage: request.targetLanguage.code,
+          primary: sample,
+          alternatives: request.targetLanguage == CoachLanguage.english
+              ? const ["It's rainy today."]
+              : const <String>[],
+          explanation: '这是符合目标语言日常习惯的自然表达。接入真实模型后，解释会结合输入和上下文生成。',
+          sentences: [CoachSentence(id: 's1', text: sample)],
+          keywords: const ['rain'],
+        ),
+        model: id,
+      ),
     );
   }
 }
