@@ -1,8 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../core/ai/conversation_engine.dart';
 import '../../core/model/app_settings.dart';
 import '../../core/model/chat_models.dart';
+import '../../core/native/native_ai_bridge.dart';
 import 'widgets/message_bubble.dart';
 
 class ChatPage extends StatefulWidget {
@@ -18,13 +22,80 @@ class _ChatPageState extends State<ChatPage> {
   final controller = TextEditingController();
   final scrollController = ScrollController();
   final messages = <ChatMessage>[];
+  final nativeAi = const NativeAiBridge();
+  StreamSubscription<Object?>? nativeEventSubscription;
   bool isLoading = false;
+  bool isListening = false;
+
+  @override
+  void initState() {
+    super.initState();
+    nativeEventSubscription = nativeAi.eventStream.listen(
+      _handleNativeEvent,
+      onError: (Object error) => _showVoiceError(error.toString()),
+    );
+  }
 
   @override
   void dispose() {
+    nativeEventSubscription?.cancel();
+    if (isListening) nativeAi.cancelListening();
     controller.dispose();
     scrollController.dispose();
     super.dispose();
+  }
+
+  Future<void> toggleListening() async {
+    if (isListening) {
+      await nativeAi.stopListening();
+      return;
+    }
+    try {
+      final available = await nativeAi.isSpeechRecognitionAvailable();
+      if (!available) {
+        _showVoiceError('当前设备没有可用的语音识别服务');
+        return;
+      }
+      await nativeAi.startListening(
+        language: widget.settings.preferredLanguage.code,
+      );
+    } on PlatformException catch (error) {
+      _showVoiceError(error.message ?? '无法启动语音识别');
+    }
+  }
+
+  void _handleNativeEvent(Object? event) {
+    if (!mounted || event is! Map) return;
+    final type = event['type'];
+    final payload = event['payload'];
+    final data = payload is Map ? payload : const <Object?, Object?>{};
+    switch (type) {
+      case 'ASR_START':
+      case 'ASR_READY':
+      case 'ASR_SPEECH_START':
+        setState(() => isListening = true);
+      case 'ASR_PARTIAL':
+        controller.text = data['text']?.toString() ?? '';
+        controller.selection = TextSelection.collapsed(
+          offset: controller.text.length,
+        );
+      case 'ASR_FINAL':
+        controller.text = data['text']?.toString() ?? '';
+        controller.selection = TextSelection.collapsed(
+          offset: controller.text.length,
+        );
+        setState(() => isListening = false);
+      case 'ASR_CANCELLED':
+        setState(() => isListening = false);
+      case 'ASR_ERROR':
+        setState(() => isListening = false);
+        _showVoiceError(data['message']?.toString() ?? '语音识别失败');
+    }
+  }
+
+  void _showVoiceError(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> send() async {
@@ -93,7 +164,12 @@ class _ChatPageState extends State<ChatPage> {
                   },
                 ),
         ),
-        _Composer(controller: controller, onSend: send),
+        _Composer(
+          controller: controller,
+          onSend: send,
+          onToggleListening: toggleListening,
+          isListening: isListening,
+        ),
       ],
     );
   }
@@ -174,9 +250,16 @@ class _EmptyState extends StatelessWidget {
 }
 
 class _Composer extends StatelessWidget {
-  const _Composer({required this.controller, required this.onSend});
+  const _Composer({
+    required this.controller,
+    required this.onSend,
+    required this.onToggleListening,
+    required this.isListening,
+  });
   final TextEditingController controller;
   final VoidCallback onSend;
+  final VoidCallback onToggleListening;
+  final bool isListening;
 
   @override
   Widget build(BuildContext context) {
@@ -188,9 +271,10 @@ class _Composer extends StatelessWidget {
         child: Row(
           children: [
             IconButton(
-              onPressed: () {},
-              icon: const Icon(Icons.mic_none),
-              tooltip: '语音输入（Phase 2）',
+              onPressed: onToggleListening,
+              icon: Icon(isListening ? Icons.stop_circle : Icons.mic_none),
+              color: isListening ? Theme.of(context).colorScheme.error : null,
+              tooltip: isListening ? '停止识别' : '语音输入',
             ),
             Expanded(
               child: TextField(

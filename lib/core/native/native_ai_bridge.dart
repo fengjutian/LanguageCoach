@@ -27,4 +27,16 @@ class NativeAiBridge {
       });
 
   Stream<Object?> get eventStream => events.receiveBroadcastStream();
+
+  Future<bool> isSpeechRecognitionAvailable() async =>
+      await commands.invokeMethod<bool>('isSpeechRecognitionAvailable') ?? false;
+
+  Future<void> startListening({required String language}) =>
+      commands.invokeMethod<void>('startListening', {'language': language});
+
+  Future<void> stopListening() =>
+      commands.invokeMethod<void>('stopListening');
+
+  Future<void> cancelListening() =>
+      commands.invokeMethod<void>('cancelListening');
 }
