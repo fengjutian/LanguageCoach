@@ -9,6 +9,7 @@ import 'package:language_coach/core/models/chat_models.dart';
 /// without waiting for the LLM response.
 class _CountingProvider implements LlmProvider {
   _CountingProvider(this.id);
+  @override
   final String id;
   int calls = 0;
   @override

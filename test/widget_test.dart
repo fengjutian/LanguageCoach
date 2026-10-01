@@ -6,8 +6,14 @@ import 'package:language_coach/features/home/home_page.dart';
 import 'package:language_coach/features/settings/application/settings_controller.dart';
 import 'package:language_coach/features/settings/settings_page.dart';
 
-Widget _wrap(Widget child) =>
-    ProviderScope(child: MaterialApp(home: child));
+/// Pages that render `ListTile` / `SwitchListTile` directly need a
+/// [Scaffold] ancestor (otherwise `debugCheckHasMaterial` fires in test).
+Widget _wrap(Widget child) => ProviderScope(
+      child: MaterialApp(home: Scaffold(body: child)),
+    );
+
+ProviderContainer _containerFor(WidgetTester tester, Finder finder) =>
+    ProviderScope.containerOf(tester.element(finder));
 
 void main() {
   testWidgets('SettingsPage renders and reflects defaults', (tester) async {
@@ -22,21 +28,20 @@ void main() {
 
   testWidgets('Settings controller propagates to settings page', (tester) async {
     await tester.pumpWidget(_wrap(const SettingsPage()));
-    final notifier = ProviderScope.container(
-        tester.element(find.byType(SettingsPage)))
-        .read(settingsControllerProvider.notifier);
-    notifier.setPreferredLanguage(CoachLanguage.japanese);
-    notifier.setSpeechSpeed(1.25);
+    final container = _containerFor(tester, find.byType(SettingsPage));
+    container.read(settingsControllerProvider.notifier)
+      ..setPreferredLanguage(CoachLanguage.japanese)
+      ..setSpeechSpeed(1.25);
     await tester.pump();
-    final value = ProviderScope.container(
-            tester.element(find.byType(SettingsPage)))
-        .read(settingsControllerProvider);
+    final value = container.read(settingsControllerProvider);
     expect(value.preferredLanguage, CoachLanguage.japanese);
     expect(value.speechSpeed, 1.25);
   });
 
   testWidgets('HomePage mounts Chat, History, Settings tabs', (tester) async {
-    await tester.pumpWidget(_wrap(const HomePage()));
+    // HomePage ships its own Scaffold + NavigationBar, so no extra body wrap.
+    await tester
+        .pumpWidget(ProviderScope(child: MaterialApp(home: const HomePage())));
     expect(find.byType(NavigationBar), findsOneWidget);
     expect(find.text('对话'), findsOneWidget);
     expect(find.text('历史'), findsOneWidget);

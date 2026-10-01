@@ -1,4 +1,6 @@
-import 'app_settings.dart';
+// CoachRequest intentionally lives in core/ai/llm_provider.dart so the
+// request type and provider interface stay co-located; importing it here would
+// produce an ambiguous-import error.
 
 /// User-facing intents the coach recognises. The order is meaningful for
 /// `indexOf` lookups and intentionally omits an `unknown` member so that
@@ -183,15 +185,4 @@ class ChatMessage {
         'response': response?.toJson(),
         'model': model,
       };
-}
-
-class CoachRequest {
-  const CoachRequest({
-    required this.text,
-    required this.targetLanguage,
-    required this.intent,
-  });
-  final String text;
-  final CoachLanguage targetLanguage;
-  final CoachIntent intent;
 }

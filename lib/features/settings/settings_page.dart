@@ -29,7 +29,9 @@ class SettingsPage extends ConsumerWidget {
               trailing: DropdownButton<CoachLanguage>(
                 value: settings.preferredLanguage,
                 underline: const SizedBox.shrink(),
-                onChanged: controller.setPreferredLanguage,
+                onChanged: (value) {
+                  if (value != null) controller.setPreferredLanguage(value);
+                },
                 items: CoachLanguage.values
                     .map(
                       (item) => DropdownMenuItem(
@@ -48,7 +50,9 @@ class SettingsPage extends ConsumerWidget {
               trailing: DropdownButton<AiProvider>(
                 value: settings.provider,
                 underline: const SizedBox.shrink(),
-                onChanged: controller.setProvider,
+                onChanged: (value) {
+                  if (value != null) controller.setProvider(value);
+                },
                 items: AiProvider.values
                     .map(
                       (provider) => DropdownMenuItem(
