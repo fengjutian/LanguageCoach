@@ -113,8 +113,15 @@ class DefaultBridge implements NativeAiBridge {
       MethodChannel('language_coach/ai_commands');
   static const EventChannel _events = EventChannel('language_coach/ai_events');
 
+  // `_events.receiveBroadcastStream()` returns a fresh broadcast stream on
+  // every call AND triggers Kotlin `onListen`. Without this cache the
+  // Flutter side stacks up redundant subscriptions, the Kotlin side
+  // overwrites its `eventSink` on each call, and only the last
+  // subscriber actually receives events. Cache one stream per bridge.
+  late final Stream<Object?> _eventStream = _events.receiveBroadcastStream();
+
   @override
-  Stream<Object?> get eventStream => _events.receiveBroadcastStream();
+  Stream<Object?> get eventStream => _eventStream;
 
   @override
   Future<String?> loadLlmModel({
@@ -291,21 +298,34 @@ extension NativeAsrEventDecoder on Object? {
 }
 
 AsrErrorKind _mapAsrError(int code) {
-  // Codes 1–9 mirror Android's `SpeechRecognizer.ERROR_*` constants.
-  // The local ASR runtime uses 1001+ so its failures cannot be confused with
-  // Android server/client errors (4/5).
+  // Two sender conventions share this channel:
+  //   - Android `SpeechRecognizer.ERROR_*` (1–9). The real values are:
+  //       1=NETWORK_TIMEOUT, 2=NETWORK, 3=AUDIO,
+  //       5=INSUFFICIENT_PERMISSIONS, 6=SERVER,
+  //       7=RECOGNIZER_BUSY, 8=NO_MATCH, 9=SPEECH_TIMEOUT.
+  //   - `AsrService` native-runtime convention (P1-4 stub):
+  //       4=microphone permission denied,
+  //       9=no model loaded (will switch to 1001/1002 once P1-5 ships).
   switch (code) {
-    case 1:
-      return AsrErrorKind.timeout;
-    case 6:
-      return AsrErrorKind.timeout;
-    case 8:
-      return AsrErrorKind.busy;
-    case 9:
+    // Permission family.
+    case 4: // AsrService: permission denied.
+    case 5: // SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS.
     case 1001:
       return AsrErrorKind.permissionDenied;
+    // Model missing.
     case 1002:
       return AsrErrorKind.modelMissing;
+    // Recogniser busy / rate-limited.
+    case 7: // SpeechRecognizer.ERROR_RECOGNIZER_BUSY.
+      return AsrErrorKind.busy;
+    // Timeout-ish network / matching failures.
+    case 1: // SpeechRecognizer.ERROR_NETWORK_TIMEOUT.
+    case 6: // SpeechRecognizer.ERROR_SERVER.
+    case 8: // SpeechRecognizer.ERROR_NO_MATCH.
+    case 9: // SpeechRecognizer.ERROR_SPEECH_TIMEOUT. NOTE: collides with
+            // AsrService's legacy model-missing code; the native path wins
+            // once P1-5 lands and that side moves to 1002.
+      return AsrErrorKind.timeout;
     default:
       return AsrErrorKind.unknown;
   }

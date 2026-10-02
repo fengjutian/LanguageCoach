@@ -26,142 +26,172 @@ class SettingsPage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final settings = ref.watch(settingsControllerProvider);
-    final controller = ref.read(settingsControllerProvider.notifier);
     return CustomScrollView(
       slivers: [
         const SliverAppBar.large(title: Text('设置')),
         SliverList.list(
-          children: [
-            const _SectionTitle('语言'),
-            ListTile(
-              leading: const Icon(Icons.translate),
-              title: const Text('首选语言'),
-              subtitle: const Text('对话中未明确指定时使用'),
-              trailing: DropdownButton<CoachLanguage>(
-                value: settings.preferredLanguage,
-                underline: const SizedBox.shrink(),
-                onChanged: (value) {
-                  if (value != null) controller.setPreferredLanguage(value);
-                },
-                items: CoachLanguage.values
-                    .map(
-                      (item) => DropdownMenuItem(
-                        value: item,
-                        child: Text('${item.flag} ${item.label}'),
-                      ),
-                    )
-                    .toList(),
-              ),
-            ),
-            const _SectionTitle('AI'),
-            ListTile(
-              leading: const Icon(Icons.auto_awesome),
-              title: const Text('Provider'),
-              subtitle: const Text('Auto 会根据任务复杂度自动选择'),
-              trailing: DropdownButton<AiProvider>(
-                value: settings.provider,
-                underline: const SizedBox.shrink(),
-                onChanged: (value) {
-                  if (value != null) controller.setProvider(value);
-                },
-                items: AiProvider.values
-                    .map(
-                      (provider) => DropdownMenuItem(
-                        value: provider,
-                        child: Text(switch (provider) {
-                          AiProvider.auto => 'Auto',
-                          AiProvider.miniMax => 'MiniMax',
-                          AiProvider.deepSeek => 'DeepSeek',
-                          AiProvider.localQwen => 'Local Qwen3',
-                        }),
-                      ),
-                    )
-                    .toList(),
-              ),
-            ),
-            const _ApiKeysSection(),
-            const _SectionTitle('语音'),
-            SwitchListTile(
-              title: const Text('自动播放'),
-              value: settings.autoPlay,
-              onChanged: controller.setAutoPlay,
-            ),
-            ListTile(
-              title: const Text('语速'),
-              subtitle: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('${settings.speechSpeed.toStringAsFixed(2)}x'),
-                  Slider(
-                    value: settings.speechSpeed,
-                    min: _kSpeechSpeedStops.first,
-                    max: _kSpeechSpeedStops.last,
-                    divisions: _kSpeechSpeedStops.length - 1,
-                    label: '${settings.speechSpeed.toStringAsFixed(2)}x',
-                    onChanged: (next) {
-                      final snapped = _kSpeechSpeedStops.reduce(
-                        (a, b) => ((next - a).abs() < (next - b).abs()) ? a : b,
-                      );
-                      controller.setSpeechSpeed(snapped);
-                    },
-                  ),
-                ],
-              ),
-            ),
-            ListTile(
-              leading: const Icon(Icons.record_voice_over_outlined),
-              title: const Text('首选语言语音'),
-              subtitle: Text(_voiceLabel(settings)),
-              trailing: DropdownButton<String>(
-                value: _currentVoiceId(settings),
-                underline: const SizedBox.shrink(),
-                onChanged: (value) {
-                  if (value != null) {
-                    controller.setVoiceForLanguage(
-                      settings.preferredLanguage,
-                      value,
-                    );
-                  }
-                },
-                items: _voicesForLanguage(settings.preferredLanguage)
-                    .map(
-                      (v) => DropdownMenuItem(
-                        value: v.id,
-                        child: Text(v.label),
-                      ),
-                    )
-                    .toList(),
-              ),
-            ),
-            const _SectionTitle('会话'),
-            SwitchListTile(
-              title: const Text('保存聊天记录'),
-              value: settings.saveHistory,
-              onChanged: controller.setSaveHistory,
-            ),
-            const _SectionTitle('模型'),
-            const _ModelsSection(),
-            const Divider(),
-            ListTile(
-              leading: const Icon(Icons.speed),
-              title: const Text('TTS Native Benchmark'),
-              subtitle: const Text('调试：直接驱动 Qwen3-TTS 运行时'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => const _TtsBenchmarkEntry(),
-                  ),
-                );
-              },
-            ),
-            const SizedBox(height: 24),
+          children: const [
+            _SettingsDestination(icon: Icons.tune, title: '常规设置', subtitle: '首选语言与聊天记录', page: _GeneralSettingsPage()),
+            _SettingsDestination(icon: Icons.auto_awesome, title: 'AI 服务', subtitle: '服务提供商与 API Key', page: _AiSettingsPage()),
+            _SettingsDestination(icon: Icons.record_voice_over_outlined, title: '语音设置', subtitle: '自动播放、语速与语音', page: _VoiceSettingsPage()),
+            _SettingsDestination(icon: Icons.memory, title: '模型与工具', subtitle: '本地模型管理与性能测试', page: _ModelSettingsPage()),
+            SizedBox(height: 24),
           ],
         ),
       ],
     );
   }
+}
+
+class _SettingsDestination extends StatelessWidget {
+  const _SettingsDestination({required this.icon, required this.title, required this.subtitle, required this.page});
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final Widget page;
+
+  @override
+  Widget build(BuildContext context) => ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+        leading: Icon(icon),
+        title: Text(title),
+        subtitle: Text(subtitle),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => page)),
+      );
+}
+
+class _SettingsScaffold extends StatelessWidget {
+  const _SettingsScaffold({required this.title, required this.children});
+  final String title;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        appBar: AppBar(title: Text(title)),
+        body: ListView(children: [...children, const SizedBox(height: 24)]),
+      );
+}
+
+class _GeneralSettingsPage extends ConsumerWidget {
+  const _GeneralSettingsPage();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final settings = ref.watch(settingsControllerProvider);
+    final controller = ref.read(settingsControllerProvider.notifier);
+    return _SettingsScaffold(title: '常规设置', children: [
+      const _SectionTitle('语言'),
+      ListTile(
+        leading: const Icon(Icons.translate),
+        title: const Text('首选语言'),
+        subtitle: const Text('对话中未明确指定时使用'),
+        trailing: DropdownButton<CoachLanguage>(
+          value: settings.preferredLanguage,
+          underline: const SizedBox.shrink(),
+          onChanged: (value) {
+            if (value != null) controller.setPreferredLanguage(value);
+          },
+          items: CoachLanguage.values.map((item) => DropdownMenuItem(value: item, child: Text('${item.flag} ${item.label}'))).toList(),
+        ),
+      ),
+      const _SectionTitle('会话'),
+      SwitchListTile(title: const Text('保存聊天记录'), value: settings.saveHistory, onChanged: controller.setSaveHistory),
+    ]);
+  }
+}
+
+class _AiSettingsPage extends ConsumerWidget {
+  const _AiSettingsPage();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final settings = ref.watch(settingsControllerProvider);
+    final controller = ref.read(settingsControllerProvider.notifier);
+    return _SettingsScaffold(title: 'AI 服务', children: [
+      const _SectionTitle('服务提供商'),
+      ListTile(
+        leading: const Icon(Icons.auto_awesome),
+        title: const Text('Provider'),
+        subtitle: const Text('Auto 会根据任务复杂度自动选择'),
+        trailing: DropdownButton<AiProvider>(
+          value: settings.provider,
+          underline: const SizedBox.shrink(),
+          onChanged: (value) {
+            if (value != null) controller.setProvider(value);
+          },
+          items: AiProvider.values.map((provider) => DropdownMenuItem(value: provider, child: Text(switch (provider) {
+            AiProvider.auto => 'Auto',
+            AiProvider.miniMax => 'MiniMax',
+            AiProvider.deepSeek => 'DeepSeek',
+            AiProvider.localQwen => 'Local Qwen3',
+          }))).toList(),
+        ),
+      ),
+      const _ApiKeysSection(),
+    ]);
+  }
+}
+
+class _VoiceSettingsPage extends ConsumerWidget {
+  const _VoiceSettingsPage();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final settings = ref.watch(settingsControllerProvider);
+    final controller = ref.read(settingsControllerProvider.notifier);
+    return _SettingsScaffold(title: '语音设置', children: [
+      SwitchListTile(title: const Text('自动播放'), value: settings.autoPlay, onChanged: controller.setAutoPlay),
+      ListTile(
+        title: const Text('语速'),
+        subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('${settings.speechSpeed.toStringAsFixed(2)}x'),
+          Slider(
+            value: settings.speechSpeed,
+            min: _kSpeechSpeedStops.first,
+            max: _kSpeechSpeedStops.last,
+            divisions: _kSpeechSpeedStops.length - 1,
+            label: '${settings.speechSpeed.toStringAsFixed(2)}x',
+            onChanged: (next) {
+              final snapped = _kSpeechSpeedStops.reduce((a, b) => ((next - a).abs() < (next - b).abs()) ? a : b);
+              controller.setSpeechSpeed(snapped);
+            },
+          ),
+        ]),
+      ),
+      ListTile(
+        leading: const Icon(Icons.record_voice_over_outlined),
+        title: const Text('首选语言语音'),
+        subtitle: Text(_voiceLabel(settings)),
+        trailing: DropdownButton<String>(
+          value: _currentVoiceId(settings),
+          underline: const SizedBox.shrink(),
+          onChanged: (value) {
+            if (value != null) controller.setVoiceForLanguage(settings.preferredLanguage, value);
+          },
+          items: _voicesForLanguage(settings.preferredLanguage).map((voice) => DropdownMenuItem(value: voice.id, child: Text(voice.label))).toList(),
+        ),
+      ),
+    ]);
+  }
+}
+
+class _ModelSettingsPage extends StatelessWidget {
+  const _ModelSettingsPage();
+
+  @override
+  Widget build(BuildContext context) => _SettingsScaffold(title: '模型与工具', children: [
+        const _SectionTitle('本地模型'),
+        const _ModelsSection(),
+        const Divider(),
+        ListTile(
+          leading: const Icon(Icons.speed),
+          title: const Text('TTS Native Benchmark'),
+          subtitle: const Text('调试：直接驱动 Qwen3-TTS 运行时'),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const _TtsBenchmarkEntry())),
+        ),
+      ]);
 }
 
 /// Voice id currently selected for the user's preferred language, falling

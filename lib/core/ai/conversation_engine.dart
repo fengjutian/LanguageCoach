@@ -26,6 +26,11 @@ class ConversationEngine {
     if (text.contains('纠正') || text.contains('correct')) {
       return CoachIntent.correction;
     }
+    if (text.contains('解释') ||
+        text.contains('explain') ||
+        text.contains('explanation')) {
+      return CoachIntent.explanation;
+    }
     if (text.contains('角色') ||
         text.contains('模拟') ||
         text.contains('roleplay')) {

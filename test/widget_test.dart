@@ -58,10 +58,28 @@ void main() {
       tester.view.resetDevicePixelRatio();
     });
     await tester.pumpWidget(_wrap(const SettingsPage()));
-    expect(find.text('设置'), findsAtLeastNWidgets(1));
+    expect(find.text('设置'), findsOneWidget);
+    expect(find.text('常规设置'), findsOneWidget);
+    expect(find.text('AI 服务'), findsOneWidget);
+    expect(find.text('语音设置'), findsOneWidget);
+    expect(find.text('模型与工具'), findsOneWidget);
+    expect(find.text('首选语言'), findsNothing);
+  });
+
+  testWidgets('SettingsPage opens settings sections as second-level pages',
+      (tester) async {
+    await tester.pumpWidget(_wrap(const SettingsPage()));
+
+    await tester.tap(find.text('常规设置'));
+    await tester.pumpAndSettle();
     expect(find.text('首选语言'), findsOneWidget);
+    expect(find.text('保存聊天记录'), findsOneWidget);
+
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('AI 服务'));
+    await tester.pumpAndSettle();
     expect(find.text('Provider'), findsOneWidget);
-    expect(find.byType(SwitchListTile), findsAtLeastNWidgets(2));
     expect(find.text('API Keys'), findsOneWidget);
   });
 

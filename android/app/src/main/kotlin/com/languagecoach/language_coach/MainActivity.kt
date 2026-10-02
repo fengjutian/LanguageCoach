@@ -25,6 +25,10 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, RecognitionL
     private var ttsService: TtsService? = null
     private var asrService: AsrService? = null
     private var llmService: LlmService? = null
+    // Track the model ids the runtime currently has resident so
+    // `onDestroy` can unload them instead of guessing the manifest id.
+    private val loadedLlmModels = mutableSetOf<String>()
+    private var loadedTtsModelId: String? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -80,6 +84,7 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, RecognitionL
                                 null,
                             )
                         } else {
+                            loadedLlmModels.add(echoed)
                             result.success(echoed)
                         }
                     }
@@ -106,6 +111,7 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, RecognitionL
                     "unloadLlmModel" -> {
                         val modelId = call.argument<String>("modelId") ?: ""
                         llmService?.unloadLlmModel(modelId)
+                        loadedLlmModels.remove(modelId)
                         result.success(null)
                     }
                     "listLlmModels" -> {
@@ -140,6 +146,7 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, RecognitionL
                                 manifestJson = manifestJson,
                                 localDirectory = localDirectory,
                             ) ?: modelId
+                            loadedTtsModelId = echoed
                             result.success(echoed)
                         } catch (e: Throwable) {
                             result.error("TTS_LOAD_FAILED", e.message, null)
@@ -157,6 +164,7 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, RecognitionL
                     "unloadModel" -> {
                         val modelId = call.argument<String>("modelId") ?: ""
                         ttsService?.unloadModel(modelId)
+                        if (loadedTtsModelId == modelId) loadedTtsModelId = null
                         result.success(null)
                     }
                     "cancelSynthesis" -> {
@@ -343,9 +351,15 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, RecognitionL
     override fun onDestroy() {
         speechRecognizer?.destroy()
         speechRecognizer = null
-        ttsService?.unloadModel("default")
+        loadedTtsModelId?.let { ttsService?.unloadModel(it) }
+        loadedTtsModelId = null
         asrService?.cancelCapture()
-        llmService?.unloadLlmModel("qwen3-llm-0.6B")
+        // Unload every LLM model the runtime has resident rather than
+        // guessing the manifest id; set is a copy so the iteration is
+        // safe if `unloadLlmModel` mutates the underlying binding.
+        val llmIds = loadedLlmModels.toList()
+        llmIds.forEach { llmService?.unloadLlmModel(it) }
+        loadedLlmModels.clear()
         super.onDestroy()
     }
 
