@@ -110,8 +110,8 @@ void main() {
       expect(share.lastPath, path);
       expect(share.lastSubject, contains('CSV'));
       final body = await File(path).readAsString();
-      expect(body.split('\n').first,
-          startsWith('started_at,label,duration_ms'));
+      expect(
+          body.split('\n').first, startsWith('started_at,label,duration_ms'));
     });
 
     test('JSON export writes a parseable envelope', () async {

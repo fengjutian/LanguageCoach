@@ -5,8 +5,7 @@ import 'benchmark_export_service.dart';
 import 'benchmark_exporter.dart';
 import 'tts_benchmark_controller.dart';
 
-final benchmarkExportServiceProvider =
-    Provider<BenchmarkExportService>((ref) {
+final benchmarkExportServiceProvider = Provider<BenchmarkExportService>((ref) {
   return BenchmarkExportService(
     exporter: const BenchmarkExporter(),
     share: ref.read(shareServiceProvider),
@@ -16,8 +15,8 @@ final benchmarkExportServiceProvider =
 /// Fire-and-await export. The caller passes the records + snapshot from
 /// [ttsBenchmarkControllerProvider]; the service writes the file and
 /// triggers the system share sheet.
-final exportBenchmarkProvider =
-    FutureProvider.family<String, BenchmarkFormat>((ref, format) async {
+final exportBenchmarkProvider = FutureProvider.autoDispose
+    .family<String, BenchmarkFormat>((ref, format) async {
   final benchmark = ref.read(ttsBenchmarkControllerProvider);
   return ref.read(benchmarkExportServiceProvider).export(
         records: benchmark.records,

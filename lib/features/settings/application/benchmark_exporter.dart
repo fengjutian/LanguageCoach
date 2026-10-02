@@ -76,8 +76,7 @@ class BenchmarkExporter {
   String suggestFilename({required BenchmarkFormat format, DateTime? now}) {
     final stamp = now ?? DateTime.now();
     String two(int v) => v.toString().padLeft(2, '0');
-    final base =
-        'benchmark_${stamp.year}${two(stamp.month)}${two(stamp.day)}'
+    final base = 'benchmark_${stamp.year}${two(stamp.month)}${two(stamp.day)}'
         '_${two(stamp.hour)}${two(stamp.minute)}';
     return format == BenchmarkFormat.csv ? '$base.csv' : '$base.json';
   }
@@ -98,6 +97,7 @@ class BenchmarkExporter {
 enum BenchmarkFormat { csv, json }
 
 extension BenchmarkFormatX on BenchmarkFormat {
-  String get mime => this == BenchmarkFormat.csv ? 'text/csv' : 'application/json';
+  String get mime =>
+      this == BenchmarkFormat.csv ? 'text/csv' : 'application/json';
   String get label => this == BenchmarkFormat.csv ? 'CSV' : 'JSON';
 }

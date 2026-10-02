@@ -134,11 +134,13 @@ class AppSettings {
     final selectedVoices = <CoachLanguage, String>{};
     if (voicesRaw is Map) {
       voicesRaw.forEach((key, value) {
-        final lang = CoachLanguage.values.firstWhere(
-          (l) => l.name == key,
-          orElse: () => CoachLanguage.english,
-        );
-        if (value is String) selectedVoices[lang] = value;
+        if (value is! String) return;
+        for (final language in CoachLanguage.values) {
+          if (language.name == key) {
+            selectedVoices[language] = value;
+            break;
+          }
+        }
       });
     }
 
@@ -160,7 +162,6 @@ class AppSettings {
         'autoPlay': autoPlay,
         'saveHistory': saveHistory,
         'lastConversationId': lastConversationId,
-        'selectedVoices':
-            selectedVoices.map((k, v) => MapEntry(k.name, v)),
+        'selectedVoices': selectedVoices.map((k, v) => MapEntry(k.name, v)),
       };
 }

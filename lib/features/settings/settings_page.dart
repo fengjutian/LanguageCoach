@@ -183,7 +183,6 @@ String _voiceLabel(AppSettings settings) {
 List<VoiceProfile> _voicesForLanguage(CoachLanguage language) =>
     voicesFor(language);
 
-
 class _ApiKeysSection extends ConsumerWidget {
   const _ApiKeysSection();
 
@@ -542,7 +541,8 @@ class _ModelCard extends ConsumerWidget {
             ),
             const SizedBox(height: 8),
             if (isBusy) ...[
-              LinearProgressIndicator(value: entry.progress == 0 ? null : entry.progress),
+              LinearProgressIndicator(
+                  value: entry.progress == 0 ? null : entry.progress),
               const SizedBox(height: 8),
               Text('${(entry.progress * 100).toStringAsFixed(0)}%  '
                   '(${_humanBytes(entry.bytesDownloaded)} / ${_humanBytes(entry.bytesTotal)})'),

@@ -131,8 +131,7 @@ class _TtsBenchmarkPageState extends ConsumerState<TtsBenchmarkPage> {
     );
     if (!mounted || picked == null) return;
     try {
-      final path =
-          await ref.read(exportBenchmarkProvider(picked).future);
+      final path = await ref.read(exportBenchmarkProvider(picked).future);
       messenger.showSnackBar(
         SnackBar(content: Text('已导出到 $path')),
       );

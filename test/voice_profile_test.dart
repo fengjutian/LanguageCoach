@@ -27,8 +27,7 @@ void main() {
   });
 
   group('AppSettings voice selection', () {
-    test('voiceFor falls back to the supplied default when no pick exists',
-        () {
+    test('voiceFor falls back to the supplied default when no pick exists', () {
       const settings = AppSettings(
         preferredLanguage: CoachLanguage.english,
         provider: AiProvider.auto,
@@ -66,6 +65,21 @@ void main() {
       );
       final round = AppSettings.fromJson(settings.toJson());
       expect(round.selectedVoices[CoachLanguage.japanese], 'ja_jp_neutral');
+    });
+
+    test('unknown JSON language keys are ignored', () {
+      final settings = AppSettings.fromJson({
+        ...AppSettings.defaults.toJson(),
+        'selectedVoices': const {
+          'futureLanguage': 'unknown_voice',
+          'japanese': 'ja_jp_neutral',
+        },
+      });
+
+      expect(settings.selectedVoices, const {
+        CoachLanguage.japanese: 'ja_jp_neutral',
+      });
+      expect(settings.selectedVoices[CoachLanguage.english], isNull);
     });
   });
 }
