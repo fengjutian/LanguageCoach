@@ -3,10 +3,13 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:uuid/uuid.dart';
 
 import '../../core/ai/llm_event.dart';
+import '../../core/database/app_database_provider.dart';
 import '../../core/models/chat_models.dart';
 import '../../core/network/api_client.dart';
+import '../../core/repositories/sqlite_conversation_repository.dart';
 import '../settings/application/settings_controller.dart';
 import 'application/conversation_providers.dart';
 import 'widgets/message_bubble.dart';
@@ -22,13 +25,14 @@ class _ChatPageState extends ConsumerState<ChatPage> {
   final controller = TextEditingController();
   final scrollController = ScrollController();
   final messages = <ChatMessage>[];
+  final _uuid = const Uuid();
   StreamSubscription<Object?>? nativeEventSubscription;
   StreamSubscription<LlmEvent>? replySubscription;
   bool isStreaming = false;
   bool isListening = false;
-
-  /// Last user input — kept so the stop / retry button can replay it.
+  String _currentConversationId = '';
   String _lastUserInput = '';
+  bool _hydrated = false;
 
   @override
   void initState() {
@@ -38,6 +42,29 @@ class _ChatPageState extends ConsumerState<ChatPage> {
       _handleNativeEvent,
       onError: (Object error) => _showVoiceError(error.toString()),
     );
+    WidgetsBinding.instance.addPostFrameCallback((_) => _hydrate());
+  }
+
+  Future<void> _hydrate() async {
+    if (_hydrated) return;
+    _hydrated = true;
+    final repo = ref.read(conversationRepositoryProvider);
+    final settings = ref.read(settingsControllerProvider);
+    if (settings.saveHistory &&
+        settings.lastConversationId != null &&
+        settings.lastConversationId!.isNotEmpty) {
+      final id = settings.lastConversationId!;
+      final msgs = await repo.messagesFor(id);
+      if (!mounted) return;
+      setState(() {
+        _currentConversationId = id;
+        messages
+          ..clear()
+          ..addAll(msgs);
+      });
+    } else {
+      _currentConversationId = _uuid.v4();
+    }
   }
 
   @override
@@ -114,14 +141,20 @@ class _ChatPageState extends ConsumerState<ChatPage> {
     if (text.isEmpty) return;
     controller.clear();
     _lastUserInput = text;
+
+    if (_currentConversationId.isEmpty) {
+      _currentConversationId = _uuid.v4();
+    }
+
+    final settings = ref.read(settingsControllerProvider);
     final userMsg = ChatMessage(
-      id: 'u_${DateTime.now().microsecondsSinceEpoch}',
+      id: 'u_${_uuid.v4()}',
       role: MessageRole.user,
       sourceText: text,
       createdAt: DateTime.now(),
     );
     final placeholder = ChatMessage(
-      id: 'a_${DateTime.now().microsecondsSinceEpoch}',
+      id: 'a_${_uuid.v4()}',
       role: MessageRole.assistant,
       createdAt: DateTime.now(),
     );
@@ -132,25 +165,48 @@ class _ChatPageState extends ConsumerState<ChatPage> {
       isStreaming = true;
     });
     _scrollDown();
+
+    if (settings.saveHistory) {
+      await _saveSettingsAndMessages(userMsg);
+    }
     _beginReply(text, placeholder.id);
+  }
+
+  Future<void> _saveSettingsAndMessages(ChatMessage userMsg) async {
+    final repo = ref.read(conversationRepositoryProvider);
+    final settings = ref.read(settingsControllerProvider);
+    await repo.ensureConversation(
+      _currentConversationId,
+      preferredLanguage: settings.preferredLanguage,
+      targetLanguage: settings.preferredLanguage,
+    );
+    await repo.appendMessage(
+      conversationId: _currentConversationId,
+      message: userMsg,
+    );
+    if (settings.lastConversationId != _currentConversationId) {
+      ref
+          .read(settingsControllerProvider.notifier)
+          .setLastConversationId(_currentConversationId);
+    }
   }
 
   void _beginReply(String text, String placeholderId) {
     replySubscription?.cancel();
     final engine = ref.read(conversationEngineProvider);
-    final completer = Completer<void>();
-    replySubscription = engine.replyStream(text).listen(
+    final settings = ref.read(settingsControllerProvider);
+    final historyContext =
+        settings.saveHistory ? _recentContext() : const <ChatMessage>[];
+    replySubscription =
+        engine.replyStream(text, context: historyContext).listen(
       (event) {
         if (!mounted) return;
         switch (event) {
           case LlmEventDelta(:final text):
             _appendDelta(placeholderId, text);
           case LlmEventComplete(:final response, :final assistantMessage):
-            _finalizeMessage(
-                placeholderId,
-                assistantMessage.copyWith(
-                  response: response,
-                ));
+            _finalizeMessage(placeholderId, assistantMessage);
+            _persistAssistant(assistantMessage.copyWith(response: response));
           case LlmEventError(:final error):
             _renderError(placeholderId, error);
         }
@@ -163,10 +219,35 @@ class _ChatPageState extends ConsumerState<ChatPage> {
       onDone: () {
         if (!mounted) return;
         setState(() => isStreaming = false);
-        if (!completer.isCompleted) completer.complete();
         _scrollDown();
       },
     );
+  }
+
+  List<ChatMessage> _recentContext({int max = 20}) {
+    if (messages.length <= max) return List.unmodifiable(messages);
+    return List.unmodifiable(messages.sublist(messages.length - max));
+  }
+
+  Future<void> _persistAssistant(ChatMessage assistant) async {
+    final settings = ref.read(settingsControllerProvider);
+    if (!settings.saveHistory) return;
+    final repo = ref.read(conversationRepositoryProvider);
+    final id = _currentConversationId;
+    if (id.isEmpty) return;
+    await repo.ensureConversation(id);
+    await repo.appendMessage(conversationId: id, message: assistant);
+
+    // Auto-title from the first user input — cheap local heuristic.
+    final repo0 = repo;
+    if (repo0 is SqliteConversationRepository) {
+      final meta = await repo0.findById(id);
+      if (meta != null &&
+          meta.title.startsWith('对话 ') &&
+          _lastUserInput.isNotEmpty) {
+        await repo0.updateTitle(id, _shortTitle(_lastUserInput));
+      }
+    }
   }
 
   void _appendDelta(String id, String delta) {
@@ -213,8 +294,6 @@ class _ChatPageState extends ConsumerState<ChatPage> {
     replySubscription?.cancel();
     replySubscription = null;
     if (!mounted) return;
-    // Keep the trailing placeholder as a partial answer; the composer swaps
-    // back to the send button now that isStreaming is false.
     setState(() => isStreaming = false);
     _scrollDown();
   }
@@ -236,6 +315,12 @@ class _ChatPageState extends ConsumerState<ChatPage> {
       LlmErrorKind.cancelled => '已取消',
       LlmErrorKind.unknown => '未知错误',
     };
+  }
+
+  String _shortTitle(String sourceText) {
+    final trimmed = sourceText.trim();
+    if (trimmed.length <= 18) return trimmed;
+    return '${trimmed.substring(0, 18)}…';
   }
 
   void _scrollDown() {
@@ -446,3 +531,5 @@ class _ErrorBubble extends StatelessWidget {
     );
   }
 }
+
+// kept for IDE reference; nothing else to anchor here.

@@ -1,35 +1,180 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-class HistoryPage extends StatelessWidget {
+import '../settings/application/settings_controller.dart';
+import 'application/history_controller.dart';
+
+class HistoryPage extends ConsumerStatefulWidget {
   const HistoryPage({super.key});
 
   @override
+  ConsumerState<HistoryPage> createState() => _HistoryPageState();
+}
+
+class _HistoryPageState extends ConsumerState<HistoryPage> {
+  final _searchController = TextEditingController();
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _confirmClearAll() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('清空所有对话？'),
+        content: const Text('此操作不可撤销。所有历史消息与回显都会被永久删除。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          FilledButton.tonal(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('确认清空'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      await ref.read(historyControllerProvider.notifier).deleteAll();
+      ref.read(settingsControllerProvider.notifier).setLastConversationId(null);
+      ref.read(historySearchQueryProvider.notifier).state = '';
+      _searchController.clear();
+    }
+  }
+
+  Future<void> _openConversation(String conversationId) async {
+    ref
+        .read(settingsControllerProvider.notifier)
+        .setLastConversationId(conversationId);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('已恢复该对话。请回到对话页查看。')),
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return const CustomScrollView(
+    final conversations = ref.watch(historyControllerProvider);
+    return CustomScrollView(
       slivers: [
-        SliverAppBar.large(title: Text('学习记录')),
-        SliverFillRemaining(
-          hasScrollBody: false,
-          child: Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.forum_outlined, size: 54, color: Colors.black38),
-                SizedBox(height: 12),
-                Text(
-                  '还没有保存的对话',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-                ),
-                SizedBox(height: 6),
-                Text(
-                  'SQLite 持久化将在下一实现批次接入',
-                  style: TextStyle(color: Colors.black54),
-                ),
-              ],
+        SliverAppBar.large(
+          title: const Text('学习记录'),
+          actions: [
+            IconButton(
+              tooltip: '清空全部',
+              onPressed: _confirmClearAll,
+              icon: const Icon(Icons.delete_sweep_outlined),
             ),
+          ],
+        ),
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: TextField(
+              controller: _searchController,
+              decoration: InputDecoration(
+                hintText: '搜索对话标题或内容',
+                prefixIcon: const Icon(Icons.search),
+                border: const OutlineInputBorder(),
+                suffixIcon: _searchController.text.isEmpty
+                    ? null
+                    : IconButton(
+                        onPressed: () {
+                          _searchController.clear();
+                          ref.read(historySearchQueryProvider.notifier).state =
+                              '';
+                        },
+                        icon: const Icon(Icons.close),
+                      ),
+              ),
+              onChanged: (value) {
+                ref.read(historySearchQueryProvider.notifier).state = value;
+                setState(() {}); // refresh suffix icon visibility
+              },
+            ),
+          ),
+        ),
+        conversations.when(
+          data: (items) {
+            if (items.isEmpty) {
+              return const SliverFillRemaining(
+                hasScrollBody: false,
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.forum_outlined,
+                          size: 54, color: Colors.black38),
+                      SizedBox(height: 12),
+                      Text(
+                        '还没有保存的对话',
+                        style: TextStyle(
+                            fontSize: 18, fontWeight: FontWeight.w600),
+                      ),
+                      SizedBox(height: 6),
+                      Text(
+                        '去对话页发一条消息试试',
+                        style: TextStyle(color: Colors.black54),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }
+            return SliverList.builder(
+              itemCount: items.length,
+              itemBuilder: (context, index) {
+                final item = items[index];
+                return Dismissible(
+                  key: ValueKey(item.id),
+                  background: Container(
+                    color: Theme.of(context).colorScheme.errorContainer,
+                    alignment: Alignment.centerRight,
+                    padding: const EdgeInsets.only(right: 24),
+                    child: const Icon(Icons.delete_outline),
+                  ),
+                  direction: DismissDirection.endToStart,
+                  onDismissed: (_) {
+                    ref
+                        .read(historyControllerProvider.notifier)
+                        .deleteConversation(item.id);
+                  },
+                  child: ListTile(
+                    leading: const Icon(Icons.chat_bubble_outline),
+                    title: Text(item.title,
+                        maxLines: 1, overflow: TextOverflow.ellipsis),
+                    subtitle:
+                        Text(item.preview.isEmpty ? '(无内容)' : item.preview),
+                    trailing: Text(
+                      _shortDate(item.updatedAt),
+                      style: const TextStyle(color: Colors.black54),
+                    ),
+                    onTap: () => _openConversation(item.id),
+                  ),
+                );
+              },
+            );
+          },
+          loading: () => const SliverFillRemaining(
+            hasScrollBody: false,
+            child: Center(child: CircularProgressIndicator()),
+          ),
+          error: (e, _) => SliverFillRemaining(
+            hasScrollBody: false,
+            child: Center(child: Text('加载失败：$e')),
           ),
         ),
       ],
     );
+  }
+
+  String _shortDate(DateTime dt) {
+    final l = dt.toLocal();
+    String two(int v) => v.toString().padLeft(2, '0');
+    return '${two(l.month)}-${two(l.day)} ${two(l.hour)}:${two(l.minute)}';
   }
 }

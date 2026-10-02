@@ -32,6 +32,7 @@ class AppSettings {
     required this.speechSpeed,
     required this.autoPlay,
     required this.saveHistory,
+    this.lastConversationId,
   });
 
   final CoachLanguage preferredLanguage;
@@ -39,6 +40,11 @@ class AppSettings {
   final double speechSpeed;
   final bool autoPlay;
   final bool saveHistory;
+
+  /// Most recently visited conversation id. `null` after first install or
+  /// after the user explicitly clears history. Stored in the SQLite settings
+  /// table so the chat page can resume the right bubble on cold start.
+  final String? lastConversationId;
 
   /// Values the audio pipeline accepts. Anything outside this set is
   /// rejected by [fromJson] / [copyWith] so the UI can never feed an invalid
@@ -66,6 +72,8 @@ class AppSettings {
     double? speechSpeed,
     bool? autoPlay,
     bool? saveHistory,
+    String? lastConversationId,
+    bool clearLastConversationId = false,
   }) {
     final nextSpeed = speechSpeed ?? this.speechSpeed;
     if (!allowedSpeechSpeeds.contains(nextSpeed)) {
@@ -81,6 +89,9 @@ class AppSettings {
       speechSpeed: nextSpeed,
       autoPlay: autoPlay ?? this.autoPlay,
       saveHistory: saveHistory ?? this.saveHistory,
+      lastConversationId: clearLastConversationId
+          ? null
+          : (lastConversationId ?? this.lastConversationId),
     );
   }
 
@@ -111,6 +122,7 @@ class AppSettings {
       speechSpeed: speed,
       autoPlay: raw['autoPlay'] == true,
       saveHistory: raw['saveHistory'] != false,
+      lastConversationId: raw['lastConversationId']?.toString(),
     );
   }
 
@@ -120,5 +132,6 @@ class AppSettings {
         'speechSpeed': speechSpeed,
         'autoPlay': autoPlay,
         'saveHistory': saveHistory,
+        'lastConversationId': lastConversationId,
       };
 }
