@@ -126,80 +126,30 @@ const ModelManifest qwen3Llm06B = ModelManifest(
 const ModelManifest qwen3Tts06B = ModelManifest(
   id: 'qwen3-tts-0.6B',
   type: 'tts',
-  version: '12hz-0.6b-customvoice-85e237c',
-  label: 'Qwen3-TTS 12Hz 0.6B CustomVoice',
-  sizeBytes: 2498383610,
-  // Use the mainland-friendly Hugging Face mirror. Keep the repository and
-  // pinned revision identical to the upstream checkpoint so the artifact
-  // checksums below remain valid.
-  downloadUrl: 'https://hf-mirror.com/Qwen/'
-      'Qwen3-TTS-12Hz-0.6B-CustomVoice/resolve/'
-      '85e237c12c027371202489a0ec509ded67b5e4b5',
+  version: '12hz-0.6b-customvoice-q4km-b7ee2e8',
+  label: 'Qwen3-TTS 12Hz 0.6B CustomVoice Q4_K_M',
+  sizeBytes: 859852832,
+  downloadUrl: 'https://hf-mirror.com/Serveurperso/'
+      'Qwen3-TTS-GGUF/resolve/'
+      'b7ee2e8c7459c3bea99da23e3d178125a7d1713c',
   sha256: '',
   minimumRamMb: 4096,
   supportedAbis: <String>['arm64-v8a'],
-  notes: 'Official Qwen CustomVoice checkpoint (about 2.50 GB).',
+  notes: 'Mobile CPU GGUF checkpoint (about 860 MB).',
   artifacts: <ModelArtifact>[
     ModelArtifact(
-      relativePath: 'config.json',
-      sizeBytes: 4908,
-      sha256: '',
-      role: 'config',
-    ),
-    ModelArtifact(
-      relativePath: 'model.safetensors',
-      sizeBytes: 1811626576,
+      relativePath: 'qwen-talker-0.6b-customvoice-Q4_K_M.gguf',
+      sizeBytes: 604878080,
       sha256:
-          'bc3c7e785eb961179c25450d1acff03f839e0002f2f3a5aeb67b5735c0fa2adb',
+          'b3a7e6613d80f8a703c06267fc1e94d48ce91932ab82ab6e31c50f4ca4868e1e',
       role: 'talker_weights',
     ),
     ModelArtifact(
-      relativePath: 'speech_tokenizer/config.json',
-      sizeBytes: 2336,
-      sha256: '',
-      role: 'decoder_config',
-    ),
-    ModelArtifact(
-      relativePath: 'speech_tokenizer/model.safetensors',
-      sizeBytes: 682293092,
+      relativePath: 'qwen-tokenizer-12hz-Q4_K_M.gguf',
+      sizeBytes: 254974752,
       sha256:
-          '836b7b357f5ea43e889936a3709af68dfe3751881acefe4ecf0dbd30ba571258',
-      role: 'voice_profile',
+          'cf3788b4d50aaa665fb6e57c170396aae03a3555fea52d2b5d0cda902d658039',
+      role: 'audio_tokenizer',
     ),
-    ModelArtifact(
-        relativePath: 'generation_config.json',
-        sizeBytes: 245,
-        sha256: '',
-        role: 'config'),
-    ModelArtifact(
-        relativePath: 'merges.txt',
-        sizeBytes: 1671839,
-        sha256: '',
-        role: 'tokenizer'),
-    ModelArtifact(
-        relativePath: 'preprocessor_config.json',
-        sizeBytes: 127,
-        sha256: '',
-        role: 'config'),
-    ModelArtifact(
-        relativePath: 'speech_tokenizer/configuration.json',
-        sizeBytes: 76,
-        sha256: '',
-        role: 'decoder_config'),
-    ModelArtifact(
-        relativePath: 'speech_tokenizer/preprocessor_config.json',
-        sizeBytes: 234,
-        sha256: '',
-        role: 'decoder_config'),
-    ModelArtifact(
-        relativePath: 'tokenizer_config.json',
-        sizeBytes: 7344,
-        sha256: '',
-        role: 'tokenizer'),
-    ModelArtifact(
-        relativePath: 'vocab.json',
-        sizeBytes: 2776833,
-        sha256: '',
-        role: 'tokenizer'),
   ],
 );
