@@ -37,6 +37,9 @@ dependencies:
   # SHA-256 verification of downloaded model artifacts (P1-5)
   crypto: ^3.0.5
 
+  # System share menu for history export (P2-2)
+  share_plus: ^10.1.2
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
