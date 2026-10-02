@@ -66,6 +66,8 @@ class ConversationEngine {
       switch (event) {
         case LlmEventDelta():
           yield event;
+        case LlmEventThinking():
+          yield event;
         case LlmEventComplete(:final response):
           createdAt ??= DateTime.now();
           yield LlmEventComplete(

@@ -169,18 +169,21 @@ class LocalQwenProvider implements LlmProvider {
 
   LlmEventComplete _buildComplete(String text, CoachRequest request) {
     final trimmed = text.trim();
-    final rawSentences = _splitter.split(trimmed);
+    final extraction = _extractThinking(trimmed);
+    final answer = extraction.cleaned.isEmpty ? trimmed : extraction.cleaned;
+    final rawSentences = _splitter.split(answer);
     final sentences = <CoachSentence>[];
     for (var i = 0; i < rawSentences.length; i++) {
       sentences.add(CoachSentence(id: 's${i + 1}', text: rawSentences[i]));
     }
-    final keywords = _extractKeywords(trimmed, max: _maxKeywords);
+    final keywords = _extractKeywords(answer, max: _maxKeywords);
 
     final response = CoachResponse(
       intent: request.intent,
       sourceLanguage: 'auto',
       targetLanguage: request.targetLanguage.code,
-      primary: trimmed,
+      primary: answer,
+      thinking: extraction.thinking,
       alternatives: const <String>[],
       explanation: '由本地 Qwen3 模型生成。',
       sentences: sentences,
@@ -197,6 +200,36 @@ class LocalQwenProvider implements LlmProvider {
       ),
     );
   }
+
+  /// Mirrors [StructuredResponseParser._splitThinking] so the on-device Qwen
+  /// output is cleaned up the same way the cloud providers' content is.
+  /// The local bridge doesn't currently emit a separate reasoning channel,
+  /// but if it ever does (or if the prompt starts wrapping output in tags),
+  /// this is the seam.
+  _ThinkingSplit _extractThinking(String input) {
+    if (input.isEmpty) return const _ThinkingSplit('', '');
+    final parts = <String>[];
+    for (final m in _thinkingBlock.allMatches(input)) {
+      for (var i = 1; i <= m.groupCount; i++) {
+        final inner = m.group(i);
+        if (inner != null) {
+          final t = inner.trim();
+          if (t.isNotEmpty) parts.add(t);
+        }
+      }
+    }
+    if (parts.isEmpty) return _ThinkingSplit('', input);
+    final cleaned = input.replaceAll(_thinkingBlock, '').trim();
+    return _ThinkingSplit(parts.join('\n\n'), cleaned);
+  }
+
+  static final RegExp _thinkingBlock = RegExp(
+    r'<think>([\s\S]*?)<\/think>'
+    r'|<reasoning>([\s\S]*?)<\/reasoning>'
+    r'|<\|begin_of_thinking\|>([\s\S]*?)<\|end_of_thinking\|>'
+    r'|【思考】([\s\S]*?)【\/思考】',
+    caseSensitive: false,
+  );
 
   /// Cheap frequency-based keyword extractor. P2-3 doesn't try to be
   /// clever — it's just enough for the chat UI to render a "vocab"
@@ -278,4 +311,11 @@ class LocalQwenProvider implements LlmProvider {
       'this', 'that', 'these', 'those',
     };
   }
+}
+
+/// Result of pulling reasoning traces out of a raw assistant message.
+class _ThinkingSplit {
+  const _ThinkingSplit(this.thinking, this.cleaned);
+  final String thinking;
+  final String cleaned;
 }

@@ -143,7 +143,7 @@ class _ScriptedBridge implements NativeAiBridge {
 class _SeededSettings extends SettingsController {
   @override
   AppSettings build() => AppSettings.defaults.copyWith(
-        preferredLanguage: CoachLanguage.french,
+        preferredLanguage: CoachLanguage.chinese,
       );
 }
 
@@ -159,7 +159,7 @@ void main() {
     final container = _container(_ScriptedBridge());
     addTearDown(container.dispose);
     // Explicit ASR input language is null → use the coach preference.
-    expect(container.read(resolvedAsrLanguageProvider), 'fr');
+    expect(container.read(resolvedAsrLanguageProvider), 'zh-CN');
   });
 
   test('ensureEngineReady loads sherpa-onnx profile when chosen', () async {

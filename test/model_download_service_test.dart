@@ -10,10 +10,16 @@ import 'package:language_coach/core/audio/model_manager.dart';
 import 'package:language_coach/core/audio/model_manifest.dart';
 
 /// Fake Dio adapter that records requests and emits a stream of bytes.
-/// Two behaviours are exposed via [mode]:
-///   * `success` — emits one chunk + closes cleanly.
-///   * `paused`  — yields the first chunk then hangs; the test calls
-///                 [ModelDownloadService.pause] and expects a paused event.
+/// Behaviours are exposed via [mode]:
+///   * `success`             — emits one chunk + closes cleanly.
+///   * `paused`              — yields the first chunk then hangs; the test
+///                             calls [ModelDownloadService.pause] and
+///                             expects a paused event.
+///   * `range_unsatisfiable` — replies 416 with no bytes. Used to assert
+///                             that the service surfaces an Errored(network)
+///                             and does not rename the partial to the final
+///                             install location on the PLACEHOLDER SHA-256
+///                             short-circuit.
 class _FakeAdapter implements HttpClientAdapter {
   _FakeAdapter({this.mode = 'success'});
 
@@ -48,6 +54,22 @@ class _FakeAdapter implements HttpClientAdapter {
         200,
         headers: {
           Headers.contentLengthHeader: [_defaultBody.length.toString()],
+        },
+      );
+    }
+    if (mode == 'range_unsatisfiable') {
+      // Server rejects the Range request with 416 and an empty body.
+      // The previous validateStatus accepted anything <500, which let
+      // the response body overwrite the partial file; the fix should
+      // now turn this into a DioException that the outer service
+      // converts into an Errored event without renaming the partial.
+      final controller = StreamController<Uint8List>();
+      Future(() => controller.close());
+      return ResponseBody(
+        controller.stream,
+        416,
+        headers: {
+          Headers.contentLengthHeader: ['0'],
         },
       );
     }
@@ -210,6 +232,61 @@ void main() {
         received.whereType<ModelErrored>().first.kind,
         ModelErrorKind.checksumMismatch,
       );
+    });
+
+    test('416 Range Unsatisfiable surfaces an Errored event and does not '
+        'promote the partial file', () async {
+      // Pre-create a partial file so the resume path is exercised — that
+      // is the only configuration where 416 is a realistic server response
+      // (the server replies 416 when the partial offset is past the
+      // canonical artifact size). The service must leave the partial
+      // bytes alone so a subsequent resume can pick up from a fresh offset.
+      final installPath = '${root.path}/models/qwen3-tts-0.6B/0.6.0';
+      await Directory('${root.path}/models/qwen3-tts-0.6B')
+          .create(recursive: true);
+      final partial = File('$installPath.partial');
+      partial.writeAsBytesSync(<int>[0xAA, 0xBB, 0xCC, 0xDD]);
+      final originalBytes = partial.readAsBytesSync();
+
+      final adapter = _FakeAdapter(mode: 'range_unsatisfiable');
+      final dio = Dio()..httpClientAdapter = adapter;
+      final service = ModelDownloadService(
+        dio: dio,
+        rootDirectory: root,
+        events: events,
+      );
+      final manifest = ModelManifest(
+        id: 'qwen3-tts-0.6B',
+        type: 'tts',
+        version: '0.6.0',
+        sizeBytes: _FakeAdapter._defaultBody.length,
+        downloadUrl: 'https://example.invalid/qwen3-tts-0.6B.tar.gz',
+        sha256: 'PLACEHOLDER_SHA256',
+        artifacts: const <ModelArtifact>[],
+      );
+      final path = await service.download(manifest);
+      expect(path, isNull);
+
+      await Future<void>.delayed(Duration.zero);
+
+      // The download must surface an Errored event; the specific kind is
+      // implementation-defined (network / unknown) but it must NOT be
+      // a ModelInstalled — that was the corruption path the original
+      // validateStatus allowed.
+      final errored = received.whereType<ModelErrored>().toList();
+      expect(errored, isNotEmpty);
+      expect(received.whereType<ModelInstalled>(), isEmpty);
+
+      // The partial file must not have been touched (its 416 body must
+      // not overwrite our bytes) and must not have been renamed to the
+      // install path.
+      final installed = File(installPath);
+      expect(installed.existsSync(), isFalse,
+          reason: 'server returned 416 — must NOT have been renamed');
+      expect(partial.existsSync(), isTrue,
+          reason: 'partial bytes must survive a 416 so resume can retry');
+      expect(partial.readAsBytesSync(), originalBytes,
+          reason: '416 body must not have overwritten the partial file');
     });
   });
 }

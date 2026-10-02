@@ -80,4 +80,47 @@ some trailing explanation
     expect(r.primary, '');
     expect(r.sentences, isEmpty);
   });
+
+  test('strips <think> block and surfaces it on thinking field', () {
+    const raw = '<think>Let me reason about present tense…</think>'
+        '{"primary":"It is raining.","explanation":"now"}';
+    final r = parse(raw);
+    expect(r.primary, 'It is raining.');
+    expect(r.thinking, 'Let me reason about present tense…');
+    expect(r.explanation, 'now');
+  });
+
+  test('preserves caller-supplied thinking when inline block is absent', () {
+    const raw = '{"primary":"hola","explanation":"greeting"}';
+    final r = parser.parse(
+      raw,
+      intent: CoachIntent.translation,
+      targetLanguage: CoachLanguage.english,
+      thinkingFromCaller: 'SSE-derived reasoning trace',
+    );
+    expect(r.primary, 'hola');
+    expect(r.thinking, 'SSE-derived reasoning trace');
+  });
+
+  test('prefers inline <think> over JSON thinking field', () {
+    const raw = '<think>plan</think>'
+        '{"primary":"hi","thinking":"json-side note"}';
+    final r = parse(raw);
+    expect(r.primary, 'hi');
+    expect(r.thinking, 'plan');
+  });
+
+  test('handles <reasoning> and <<<REASONING>>> wrappers too', () {
+    const raw = '<reasoning>step 1</reasoning>{"primary":"a"}'
+        '\n<<<REASONING>>>step 2<<<END>>>{"primary":"b"}';
+    final r = parse(raw);
+    expect(r.thinking, 'step 1\n\nstep 2');
+  });
+
+  test('thinking without JSON falls back to cleaned text as primary', () {
+    const raw = '<think>just thinking</think>hello world';
+    final r = parse(raw);
+    expect(r.thinking, 'just thinking');
+    expect(r.primary, 'hello world');
+  });
 }

@@ -223,6 +223,8 @@ class _ChatPageState extends ConsumerState<ChatPage> {
         switch (event) {
           case LlmEventDelta(:final text):
             _appendDelta(placeholderId, text);
+          case LlmEventThinking(:final text):
+            _appendThinking(placeholderId, text);
           case LlmEventComplete(:final response, :final assistantMessage):
             _finalizeMessage(placeholderId, assistantMessage);
             _persistAssistant(assistantMessage.copyWith(response: response));
@@ -283,6 +285,25 @@ class _ChatPageState extends ConsumerState<ChatPage> {
           sentences: const <CoachSentence>[],
         );
     final next = response.copyWith(primary: response.primary + delta);
+    setState(() {
+      messages[idx] = current.copyWith(response: next);
+    });
+  }
+
+  void _appendThinking(String id, String delta) {
+    final idx = messages.indexWhere((m) => m.id == id);
+    if (idx < 0) return;
+    final current = messages[idx];
+    final response = current.response ??
+        CoachResponse(
+          intent: CoachIntent.conversation,
+          sourceLanguage: 'auto',
+          targetLanguage: '',
+          primary: '',
+          explanation: '',
+          sentences: const <CoachSentence>[],
+        );
+    final next = response.copyWith(thinking: response.thinking + delta);
     setState(() {
       messages[idx] = current.copyWith(response: next);
     });

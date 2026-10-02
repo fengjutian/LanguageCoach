@@ -24,14 +24,16 @@ void main() {
       expect(match.languageCode, 'zh-CN');
     });
 
-    test('bestFit falls back to highest-accuracy profile on language miss', () {
+    test('bestFit returns null on language mismatch instead of falling back',
+        () {
       final profiles = knownAsrProfiles();
       // Pretend only `en-US` is installed for some reason — bestFit should
-      // still hand back something rather than null.
+      // refuse rather than guess. Feeding a Mandarin model a Japanese
+      // speaker produced garbage text, which is worse than a "model not
+      // installed" error surfaced upstream.
       final installed = profiles.where((p) => p.languageCode == 'en-US');
       final match = bestFit('zh-CN', installed);
-      expect(match, isNotNull);
-      expect(match!.languageCode, 'en-US');
+      expect(match, isNull);
     });
 
     test('bestFit returns null when nothing is installed', () {

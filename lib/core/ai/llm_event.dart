@@ -15,6 +15,15 @@ class LlmEventDelta extends LlmEvent {
   final String text;
 }
 
+/// Partial reasoning trace emitted by thinking-enabled LLMs (DeepSeek-R1,
+/// `<think>` blocks, etc.). Surfaced to the UI separately from
+/// [LlmEventDelta] so the final `primary` answer is never polluted by
+/// internal monologue.
+class LlmEventThinking extends LlmEvent {
+  const LlmEventThinking(this.text);
+  final String text;
+}
+
 /// Terminal event — the structured [CoachResponse] has been assembled. The
 /// stream will not emit any more deltas after [LlmEventComplete].
 class LlmEventComplete extends LlmEvent {

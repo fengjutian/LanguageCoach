@@ -135,6 +135,10 @@ class MessageBubble extends ConsumerWidget {
               ),
             ],
           ),
+          if (response.thinking.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            _ThinkingExpansion(thinking: response.thinking),
+          ],
           const SizedBox(height: 14),
           _BubbleText(
             text: response.primary,
@@ -361,6 +365,81 @@ class _SentenceTile extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Collapsible reasoning section — collapsed by default so the primary
+/// answer stays scannable, expandable for users who want to inspect the
+/// model's trace. Kept inside the same bubble so the visual link between
+/// question / answer / thinking stays obvious.
+class _ThinkingExpansion extends StatefulWidget {
+  const _ThinkingExpansion({required this.thinking});
+  final String thinking;
+
+  @override
+  State<_ThinkingExpansion> createState() => _ThinkingExpansionState();
+}
+
+class _ThinkingExpansionState extends State<_ThinkingExpansion> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.04),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          InkWell(
+            onTap: () => setState(() => _expanded = !_expanded),
+            borderRadius: BorderRadius.circular(8),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: Row(
+                children: [
+                  Icon(
+                    _expanded ? Icons.expand_less : Icons.expand_more,
+                    size: 16,
+                    color: Colors.black54,
+                  ),
+                  const SizedBox(width: 4),
+                  const Icon(
+                    Icons.psychology_outlined,
+                    size: 14,
+                    color: Colors.black45,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    _expanded ? '收起思考过程' : '展开思考过程',
+                    style: const TextStyle(
+                      color: Colors.black54,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (_expanded) ...[
+            const SizedBox(height: 6),
+            _BubbleText(
+              text: widget.thinking,
+              style: const TextStyle(
+                fontSize: 12.5,
+                color: Colors.black54,
+                height: 1.4,
+                fontStyle: FontStyle.italic,
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }

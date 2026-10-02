@@ -1,18 +1,22 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/audio/audio_cache.dart';
 import '../../../core/audio/audio_player.dart';
 import '../../../core/audio/audio_queue.dart';
 import '../../../core/audio/fake_tts_engine.dart';
+import '../../../core/audio/minimax_tts_engine.dart';
 import '../../../core/audio/sentence_splitter.dart';
 import '../../../core/audio/tts_engine.dart';
 import '../../../core/audio/tts_models.dart';
 import '../../../core/audio/voice_profile.dart';
 import '../../../core/models/app_settings.dart';
+import '../../../core/security/secure_key_store.dart';
 import '../../settings/application/settings_controller.dart';
+import 'conversation_providers.dart';
 
 /// State exposed to widgets that surface a sentence-level play / pause
 /// indicator. The shape is deliberately minimal so MessageBubble can
@@ -63,11 +67,31 @@ enum SentencePlaybackState {
 final sentenceSplitterProvider =
     Provider<SentenceSplitter>((_) => const SentenceSplitter());
 
+/// Snapshot of the MiniMax API key configured for cloud synthesis.
+/// `null` (or an empty string) means the cloud engine is unavailable
+/// and the runtime falls back to the off-platform stub.
+final miniMaxTtsApiKeyProvider = FutureProvider<String?>((ref) async {
+  final store = ref.read(secureKeyStoreProvider);
+  return store.read(ApiKeySlot.miniMax);
+});
+
 final ttsEngineProvider = Provider<TtsEngine>((ref) {
-  // Default to the off-platform stub until Android system TTS / Qwen3-TTS
-  // wires up; production overrides this in `main.dart` once the engine is
-  // available.
   final outputDir = ref.watch(ttsOutputDirectoryProvider);
+  // Watch the cached API key. When the user has entered a MiniMax key the
+  // runtime swaps the off-platform stub for a cloud-backed engine — that
+  // is the path that lets the app do cloud TTS while bypassing the ~860 MB
+  // Qwen3-TTS GGUF download. The actual switch is below.
+  final apiKey = ref.watch(miniMaxTtsApiKeyProvider).maybeWhen(
+        data: (k) => k,
+        orElse: () => null,
+      );
+  if (apiKey != null && apiKey.isNotEmpty) {
+    return MinimaxTtsEngine(
+      dio: Dio(),
+      apiKeyResolver: () async => apiKey,
+      outputDirectory: outputDir,
+    );
+  }
   return FakeTtsEngine(outputDirectory: outputDir);
 });
 

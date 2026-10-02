@@ -53,6 +53,11 @@ class CoachSentence {
 /// technical design: `intent / sourceLanguage / targetLanguage / answer /
 /// sentences / learning`. `learning.{difficulty,keywords}` collapse into
 /// [keywords] until we add difficulty in a later milestone.
+///
+/// [thinking] carries the model's reasoning trace (`<think>...</think>`,
+/// DeepSeek `delta.reasoning_content`, or a JSON `"thinking"` field) so the
+/// UI can show it in a collapsible section without leaking it into the
+/// primary answer the user reads.
 class CoachResponse {
   const CoachResponse({
     required this.intent,
@@ -61,6 +66,7 @@ class CoachResponse {
     required this.primary,
     required this.explanation,
     required this.sentences,
+    this.thinking = '',
     this.alternatives = const <String>[],
     this.keywords = const <String>[],
   });
@@ -69,6 +75,7 @@ class CoachResponse {
   final String sourceLanguage;
   final String targetLanguage;
   final String primary;
+  final String thinking;
   final List<String> alternatives;
   final String explanation;
   final List<CoachSentence> sentences;
@@ -79,6 +86,7 @@ class CoachResponse {
     String? sourceLanguage,
     String? targetLanguage,
     String? primary,
+    String? thinking,
     List<String>? alternatives,
     String? explanation,
     List<CoachSentence>? sentences,
@@ -89,6 +97,7 @@ class CoachResponse {
       sourceLanguage: sourceLanguage ?? this.sourceLanguage,
       targetLanguage: targetLanguage ?? this.targetLanguage,
       primary: primary ?? this.primary,
+      thinking: thinking ?? this.thinking,
       alternatives: alternatives ?? this.alternatives,
       explanation: explanation ?? this.explanation,
       sentences: sentences ?? this.sentences,
@@ -129,6 +138,7 @@ class CoachResponse {
       sourceLanguage: raw['sourceLanguage']?.toString() ?? 'auto',
       targetLanguage: raw['targetLanguage']?.toString() ?? '',
       primary: primary,
+      thinking: raw['thinking']?.toString() ?? '',
       alternatives: _readStringList(raw['alternatives']),
       explanation: raw['explanation']?.toString() ?? '',
       sentences: List.unmodifiable(sentences),
@@ -141,6 +151,7 @@ class CoachResponse {
         'sourceLanguage': sourceLanguage,
         'targetLanguage': targetLanguage,
         'primary': primary,
+        'thinking': thinking,
         'alternatives': alternatives,
         'explanation': explanation,
         'sentences': sentences.map((s) => s.toJson()).toList(),

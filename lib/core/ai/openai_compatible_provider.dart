@@ -111,6 +111,7 @@ JSON object (no prose, no markdown fences) matching this schema:
     }
 
     final buffer = StringBuffer();
+    final thinkingBuffer = StringBuffer();
     var emittedError = false;
 
     try {
@@ -120,10 +121,18 @@ JSON object (no prose, no markdown fences) matching this schema:
           if (event.data == '[DONE]') {
             break;
           }
-          final delta = _extractDelta(event.data);
-          if (delta != null && delta.isNotEmpty) {
-            buffer.write(delta);
-            yield LlmEventDelta(delta);
+          final parts = _extractDeltaParts(event.data);
+          if (parts.content != null && parts.content!.isNotEmpty) {
+            buffer.write(parts.content);
+            yield LlmEventDelta(parts.content!);
+          }
+          // Reasoning tokens arrive separately from answer tokens on
+          // thinking-enabled endpoints (DeepSeek-R1 puts the trace in
+          // `delta.reasoning_content`). We stream them as their own event so
+          // the UI can fold them away and so they never leak into `primary`.
+          if (parts.reasoning != null && parts.reasoning!.isNotEmpty) {
+            thinkingBuffer.write(parts.reasoning);
+            yield LlmEventThinking(parts.reasoning!);
           }
           final errMsg = _extractError(event.data);
           if (errMsg != null) {
@@ -151,6 +160,7 @@ JSON object (no prose, no markdown fences) matching this schema:
       buffer.toString(),
       intent: request.intent,
       targetLanguage: request.targetLanguage,
+      thinkingFromCaller: thinkingBuffer.toString(),
     );
     final message = ChatMessage(
       id: DateTime.now().microsecondsSinceEpoch.toString(),
@@ -192,7 +202,7 @@ JSON object (no prose, no markdown fences) matching this schema:
     }
   }
 
-  String? _extractDelta(String data) {
+  _DeltaParts _extractDeltaParts(String data) {
     try {
       final decoded = json.decode(data);
       if (decoded is Map) {
@@ -203,11 +213,16 @@ JSON object (no prose, no markdown fences) matching this schema:
             final delta = first['delta'];
             if (delta is Map) {
               final content = delta['content'];
-              if (content is String) return content;
+              final reasoning = delta['reasoning_content'];
+              return _DeltaParts(
+                content: content is String ? content : null,
+                reasoning: reasoning is String ? reasoning : null,
+              );
             }
-            // Some servers (DeepSeek) emit `text` rather than `delta.content`
+            // Some servers (DeepSeek legacy) emit `text` rather than
+            // `delta.content`.
             final text = first['text'];
-            if (text is String) return text;
+            if (text is String) return _DeltaParts(content: text);
           }
         }
       }
@@ -215,7 +230,7 @@ JSON object (no prose, no markdown fences) matching this schema:
       developer.log('sse parse failure',
           name: 'OpenAiCompatibleProvider', error: e);
     }
-    return null;
+    return const _DeltaParts();
   }
 
   String? _extractError(String data) {
@@ -239,4 +254,13 @@ class _SseEvent {
   const _SseEvent(this.data, this.status);
   final String data;
   final int? status;
+}
+
+/// Per-delta extraction. `content` is the visible answer chunk;
+/// `reasoning` is the model's thinking trace (`delta.reasoning_content` on
+/// DeepSeek-R1 and friends). Either or both can be null per event.
+class _DeltaParts {
+  const _DeltaParts({this.content, this.reasoning});
+  final String? content;
+  final String? reasoning;
 }
