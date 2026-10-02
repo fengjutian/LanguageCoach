@@ -133,8 +133,7 @@ void main() {
     final bridge = _ScriptedBridge();
     final container = _container(bridge);
     addTearDown(container.dispose);
-    container.read(asrEngineChoiceProvider.notifier)
-      ..set(AsrEngineChoice.sherpaOnnx);
+    container.read(asrEngineChoiceProvider.notifier).set(AsrEngineChoice.sherpaOnnx);
     final controller = container.read(speechSessionControllerProvider.notifier);
     final ready = await controller.ensureEngineReady();
     expect(ready, isTrue);
@@ -152,8 +151,7 @@ void main() {
     final bridge = _ScriptedBridge();
     final container = _container(bridge);
     addTearDown(container.dispose);
-    container.read(asrEngineChoiceProvider.notifier)
-      ..set(AsrEngineChoice.sherpaOnnx);
+    container.read(asrEngineChoiceProvider.notifier).set(AsrEngineChoice.sherpaOnnx);
     final controller = container.read(speechSessionControllerProvider.notifier);
     await controller.ensureEngineReady();
     await controller.start();

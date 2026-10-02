@@ -15,6 +15,7 @@ class ModelManifest {
     required this.downloadUrl,
     required this.sha256,
     required this.artifacts,
+    this.label,
     this.minimumRamMb,
     this.supportedAbis = const <String>['arm64-v8a'],
     this.notes,
@@ -43,6 +44,9 @@ class ModelManifest {
   /// Individual files contained inside the archive — checked individually
   /// after extraction.
   final List<ModelArtifact> artifacts;
+
+  /// Human-readable display label used by the model manager UI.
+  final String? label;
 
   /// Soft device gate. The download manager rejects installs on devices
   /// below this threshold.
@@ -83,6 +87,7 @@ const ModelManifest qwen3Tts06B = ModelManifest(
   id: 'qwen3-tts-0.6B',
   type: 'tts',
   version: '0.6.0',
+  label: 'Qwen3-TTS 0.6B',
   sizeBytes: 0,
   downloadUrl: 'https://example.invalid/qwen3-tts-0.6B.tar.gz',
   sha256: 'PLACEHOLDER_SHA256',

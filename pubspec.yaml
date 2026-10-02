@@ -34,6 +34,9 @@ dependencies:
   # Audio playback (P1-1 wiring — Android ExoPlayer-backed)
   just_audio: ^0.9.42
 
+  # SHA-256 verification of downloaded model artifacts (P1-5)
+  crypto: ^3.0.5
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

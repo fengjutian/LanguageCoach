@@ -4,12 +4,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/ai/llm_event.dart';
 import '../../core/ai/llm_provider.dart';
 import '../../core/ai/minimax_provider.dart';
+import '../../core/audio/model_manager.dart';
 import '../../core/models/app_settings.dart';
 import '../../core/models/chat_models.dart';
 import '../../core/network/api_client.dart';
 import '../../core/security/secure_key_store.dart';
 import '../chat/application/conversation_providers.dart';
 import 'application/api_keys_controller.dart';
+import 'application/model_controller.dart';
 import 'application/settings_controller.dart';
 import 'tts_benchmark_page.dart';
 
@@ -113,24 +115,7 @@ class SettingsPage extends ConsumerWidget {
               onChanged: controller.setSaveHistory,
             ),
             const _SectionTitle('模型'),
-            const ListTile(
-              leading: Icon(Icons.memory),
-              title: Text('Qwen3 0.6B'),
-              subtitle: Text('尚未下载'),
-              trailing: Icon(Icons.download_outlined),
-            ),
-            const ListTile(
-              leading: Icon(Icons.graphic_eq),
-              title: Text('Qwen3-TTS 0.6B'),
-              subtitle: Text('尚未下载'),
-              trailing: Icon(Icons.download_outlined),
-            ),
-            const ListTile(
-              leading: Icon(Icons.hearing),
-              title: Text('sherpa-onnx ASR'),
-              subtitle: Text('尚未下载'),
-              trailing: Icon(Icons.download_outlined),
-            ),
+            const _ModelsSection(),
             const Divider(),
             ListTile(
               leading: const Icon(Icons.speed),
@@ -432,5 +417,204 @@ class _TtsBenchmarkRouter extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return const TtsBenchmarkPage();
+  }
+}
+
+class _ModelsSection extends ConsumerWidget {
+  const _ModelsSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final state = ref.watch(modelControllerProvider);
+    final entries = state.entries;
+    if (entries.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+        child: Text('模型清单尚未连接，下载服务未启动。'),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: entries.map((e) => _ModelCard(entry: e)).toList(),
+    );
+  }
+}
+
+class _StatusChip extends StatelessWidget {
+  const _StatusChip({required this.status});
+  final ModelDownloadStatus status;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final (label, color) = switch (status) {
+      ModelDownloadStatus.notInstalled => ('未下载', scheme.outline),
+      ModelDownloadStatus.downloading => ('下载中', scheme.primary),
+      ModelDownloadStatus.paused => ('已暂停', scheme.tertiary),
+      ModelDownloadStatus.verifying => ('校验中', scheme.secondary),
+      ModelDownloadStatus.installed => ('已安装', scheme.primary),
+      ModelDownloadStatus.updateAvailable => ('可更新', scheme.tertiary),
+      ModelDownloadStatus.corrupted => ('已损坏', scheme.error),
+      ModelDownloadStatus.loaded => ('已加载', Colors.green),
+    };
+    return Chip(
+      visualDensity: VisualDensity.compact,
+      backgroundColor: color.withValues(alpha: 0.15),
+      side: BorderSide(color: color.withValues(alpha: 0.4)),
+      label: Text(label, style: TextStyle(color: color)),
+    );
+  }
+}
+
+class _ModelCard extends ConsumerWidget {
+  const _ModelCard({required this.entry});
+  final ModelEntry entry;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final controller = ref.read(modelControllerProvider.notifier);
+    final status = entry.status;
+    final isBusy = status == ModelDownloadStatus.downloading ||
+        status == ModelDownloadStatus.verifying;
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '${entry.manifest.label} · ${entry.manifest.version}',
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                ),
+                _StatusChip(status: status),
+              ],
+            ),
+            const SizedBox(height: 8),
+            if (isBusy) ...[
+              LinearProgressIndicator(value: entry.progress == 0 ? null : entry.progress),
+              const SizedBox(height: 8),
+              Text('${(entry.progress * 100).toStringAsFixed(0)}%  '
+                  '(${_humanBytes(entry.bytesDownloaded)} / ${_humanBytes(entry.bytesTotal)})'),
+            ] else if (status == ModelDownloadStatus.notInstalled) ...[
+              const Text('模型未下载'),
+            ] else if (status == ModelDownloadStatus.updateAvailable) ...[
+              const Text('新版本可下载'),
+            ] else if (status == ModelDownloadStatus.corrupted) ...[
+              const Text('校验失败，模型文件已损坏。可点击重试。'),
+            ] else if (entry.localPath != null) ...[
+              Text(entry.localPath!,
+                  style: const TextStyle(color: Colors.black54, fontSize: 12)),
+            ],
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                if (status == ModelDownloadStatus.notInstalled ||
+                    status == ModelDownloadStatus.updateAvailable ||
+                    status == ModelDownloadStatus.corrupted)
+                  OutlinedButton.icon(
+                    onPressed: () => controller.download(entry.manifest.id),
+                    icon: const Icon(Icons.download_outlined),
+                    label: const Text('下载'),
+                  ),
+                if (status == ModelDownloadStatus.downloading)
+                  OutlinedButton.icon(
+                    onPressed: () => controller.pause(entry.manifest.id),
+                    icon: const Icon(Icons.pause),
+                    label: const Text('暂停'),
+                  ),
+                if (status == ModelDownloadStatus.paused)
+                  OutlinedButton.icon(
+                    onPressed: () async {
+                      await controller.resume(entry.manifest.id);
+                    },
+                    icon: const Icon(Icons.play_arrow),
+                    label: const Text('继续'),
+                  ),
+                if (isBusy || status == ModelDownloadStatus.paused)
+                  OutlinedButton.icon(
+                    onPressed: () => controller.cancel(entry.manifest.id),
+                    icon: const Icon(Icons.close),
+                    label: const Text('取消'),
+                  ),
+                if (status == ModelDownloadStatus.installed)
+                  OutlinedButton.icon(
+                    onPressed: () async {
+                      final ok = await controller.load(entry.manifest.id);
+                      if (!context.mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                          content:
+                              Text(ok ? '已加载 ${entry.manifest.id}' : '加载失败')));
+                    },
+                    icon: const Icon(Icons.play_circle_outline),
+                    label: const Text('加载'),
+                  ),
+                if (status == ModelDownloadStatus.loaded)
+                  OutlinedButton.icon(
+                    onPressed: () => controller.unload(entry.manifest.id),
+                    icon: const Icon(Icons.stop_circle_outlined),
+                    label: const Text('卸载'),
+                  ),
+                if (status == ModelDownloadStatus.installed ||
+                    status == ModelDownloadStatus.loaded ||
+                    status == ModelDownloadStatus.corrupted)
+                  OutlinedButton.icon(
+                    onPressed: () => _confirmDelete(context, ref),
+                    icon: const Icon(Icons.delete_outline),
+                    label: const Text('删除'),
+                  ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _confirmDelete(BuildContext context, WidgetRef ref) async {
+    final isLoaded = entry.status == ModelDownloadStatus.loaded;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(isLoaded ? '强制删除正在使用的模型？' : '删除已下载的模型？'),
+        content: Text(isLoaded
+            ? '${entry.manifest.label} 当前正在使用中。删除前会自动卸载并释放内存，'
+                '且无法恢复——只能重新下载。'
+            : '删除 ${entry.manifest.label} 后再次使用需要重新下载。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          FilledButton.tonal(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('确认删除'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      await ref
+          .read(modelControllerProvider.notifier)
+          .delete(entry.manifest.id);
+    }
+  }
+
+  String _humanBytes(int bytes) {
+    if (bytes <= 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB'];
+    var value = bytes.toDouble();
+    var unit = 0;
+    while (value > 1024 && unit < units.length - 1) {
+      value /= 1024;
+      unit++;
+    }
+    return '${value.toStringAsFixed(value >= 10 ? 0 : 1)} ${units[unit]}';
   }
 }
