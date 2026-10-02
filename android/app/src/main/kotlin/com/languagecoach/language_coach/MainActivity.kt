@@ -3,7 +3,9 @@ package com.languagecoach.language_coach
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Bundle
+import android.provider.Settings
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -53,6 +55,19 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, RecognitionL
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, COMMANDS_CHANNEL)
             .setMethodCallHandler { call, result ->
                 when (call.method) {
+                    "openAppSettings" -> {
+                        try {
+                            startActivity(
+                                Intent(
+                                    Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                    Uri.fromParts("package", packageName, null),
+                                ),
+                            )
+                            result.success(null)
+                        } catch (e: Throwable) {
+                            result.error("OPEN_SETTINGS_FAILED", e.message, null)
+                        }
+                    }
                     "startListening" -> {
                         val language = call.argument<String>("language") ?: "en-US"
                         requestAudioPermissionAndStart(language, result)

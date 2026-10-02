@@ -67,6 +67,7 @@ class ModelArtifact {
     required this.sizeBytes,
     required this.sha256,
     required this.role,
+    this.downloadUrl,
   });
 
   /// Path inside the on-device model directory.
@@ -74,6 +75,7 @@ class ModelArtifact {
 
   final int sizeBytes;
   final String sha256;
+  final String? downloadUrl;
 
   /// What the runtime does with this file: `tokenizer`, `talker_weights`,
   /// `decoder_config`, `voice_profile`, etc.
@@ -124,39 +126,44 @@ const ModelManifest qwen3Llm06B = ModelManifest(
 const ModelManifest qwen3Tts06B = ModelManifest(
   id: 'qwen3-tts-0.6B',
   type: 'tts',
-  version: '0.6.0',
-  label: 'Qwen3-TTS 0.6B',
-  sizeBytes: 0,
-  downloadUrl: 'https://example.invalid/qwen3-tts-0.6B.tar.gz',
-  sha256: 'PLACEHOLDER_SHA256',
+  version: '12hz-0.6b-customvoice-85e237c',
+  label: 'Qwen3-TTS 12Hz 0.6B CustomVoice',
+  sizeBytes: 2498388610,
+  downloadUrl: 'https://huggingface.co/Qwen/'
+      'Qwen3-TTS-12Hz-0.6B-CustomVoice/resolve/'
+      '85e237c12c027371202489a0ec509ded67b5e4b5',
+  sha256: '',
   minimumRamMb: 4096,
   supportedAbis: <String>['arm64-v8a'],
-  notes: 'Placeholder manifest. Real SHA-256 and URL land with the model '
-      'release in P1-5.',
+  notes: 'Official Qwen CustomVoice checkpoint (about 2.50 GB).',
   artifacts: <ModelArtifact>[
     ModelArtifact(
-      relativePath: 'tokenizer.json',
-      sizeBytes: 0,
-      sha256: 'PLACEHOLDER_TOKENIZER_SHA256',
-      role: 'tokenizer',
+      relativePath: 'config.json', sizeBytes: 4908, sha256: '', role: 'config',
     ),
     ModelArtifact(
-      relativePath: 'talker_qwen.bin',
-      sizeBytes: 0,
-      sha256: 'PLACEHOLDER_TALKER_SHA256',
+      relativePath: 'model.safetensors',
+      sizeBytes: 1811626576,
+      sha256: 'bc3c7e785eb961179c25450d1acff03f839e0002f2f3a5aeb67b5735c0fa2adb',
       role: 'talker_weights',
     ),
     ModelArtifact(
-      relativePath: 'decoder_config.json',
-      sizeBytes: 0,
-      sha256: 'PLACEHOLDER_DECODER_SHA256',
+      relativePath: 'speech_tokenizer/config.json',
+      sizeBytes: 2336,
+      sha256: '',
       role: 'decoder_config',
     ),
     ModelArtifact(
-      relativePath: 'voices/cherry.json',
-      sizeBytes: 0,
-      sha256: 'PLACEHOLDER_VOICE_SHA256',
+      relativePath: 'speech_tokenizer/model.safetensors',
+      sizeBytes: 682293092,
+      sha256: '836b7b357f5ea43e889936a3709af68dfe3751881acefe4ecf0dbd30ba571258',
       role: 'voice_profile',
     ),
+    ModelArtifact(relativePath: 'generation_config.json', sizeBytes: 245, sha256: '', role: 'config'),
+    ModelArtifact(relativePath: 'merges.txt', sizeBytes: 1671839, sha256: '', role: 'tokenizer'),
+    ModelArtifact(relativePath: 'preprocessor_config.json', sizeBytes: 127, sha256: '', role: 'config'),
+    ModelArtifact(relativePath: 'speech_tokenizer/configuration.json', sizeBytes: 76, sha256: '', role: 'decoder_config'),
+    ModelArtifact(relativePath: 'speech_tokenizer/preprocessor_config.json', sizeBytes: 234, sha256: '', role: 'decoder_config'),
+    ModelArtifact(relativePath: 'tokenizer_config.json', sizeBytes: 7344, sha256: '', role: 'tokenizer'),
+    ModelArtifact(relativePath: 'vocab.json', sizeBytes: 2776833, sha256: '', role: 'tokenizer'),
   ],
 );
