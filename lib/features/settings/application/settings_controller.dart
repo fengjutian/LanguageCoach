@@ -51,6 +51,16 @@ class SettingsController extends Notifier<AppSettings> {
     unawaited(_persist());
   }
 
+  /// Picks the voice id used when [language] is the active target.
+  /// Stored as a per-language map so users can keep their preferred
+  /// voice even after switching the default language.
+  void setVoiceForLanguage(CoachLanguage language, String voiceId) {
+    final next = Map<CoachLanguage, String>.from(state.selectedVoices);
+    next[language] = voiceId;
+    state = state.copyWith(selectedVoices: next);
+    unawaited(_persist());
+  }
+
   void setAutoPlay(bool value) {
     state = state.copyWith(autoPlay: value);
     unawaited(_persist());

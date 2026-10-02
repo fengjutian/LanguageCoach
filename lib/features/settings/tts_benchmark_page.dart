@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'application/benchmark_export_providers.dart';
+import 'application/benchmark_exporter.dart';
 import 'application/tts_benchmark_controller.dart';
 
 /// Diagnostic screen that talks to the native Qwen3-TTS runtime. Lives
@@ -69,6 +71,13 @@ class _TtsBenchmarkPageState extends ConsumerState<TtsBenchmarkPage> {
                 icon: const Icon(Icons.cleaning_services),
                 label: const Text('Unload'),
               ),
+              OutlinedButton.icon(
+                onPressed: state.records.isEmpty
+                    ? null
+                    : () => _showExportMenu(context),
+                icon: const Icon(Icons.ios_share),
+                label: const Text('Export'),
+              ),
             ],
           ),
           const SizedBox(height: 16),
@@ -96,6 +105,42 @@ class _TtsBenchmarkPageState extends ConsumerState<TtsBenchmarkPage> {
         ],
       ),
     );
+  }
+
+  Future<void> _showExportMenu(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final picked = await showModalBottomSheet<BenchmarkFormat>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.table_chart_outlined),
+              title: const Text('导出为 CSV'),
+              onTap: () => Navigator.pop(ctx, BenchmarkFormat.csv),
+            ),
+            ListTile(
+              leading: const Icon(Icons.data_object),
+              title: const Text('导出为 JSON'),
+              onTap: () => Navigator.pop(ctx, BenchmarkFormat.json),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted || picked == null) return;
+    try {
+      final path =
+          await ref.read(exportBenchmarkProvider(picked).future);
+      messenger.showSnackBar(
+        SnackBar(content: Text('已导出到 $path')),
+      );
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('导出失败：$e')),
+      );
+    }
   }
 }
 

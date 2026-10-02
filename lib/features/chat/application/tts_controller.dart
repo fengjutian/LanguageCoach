@@ -10,6 +10,7 @@ import '../../../core/audio/fake_tts_engine.dart';
 import '../../../core/audio/sentence_splitter.dart';
 import '../../../core/audio/tts_engine.dart';
 import '../../../core/audio/tts_models.dart';
+import '../../../core/audio/voice_profile.dart';
 import '../../../core/models/app_settings.dart';
 import '../../settings/application/settings_controller.dart';
 
@@ -316,10 +317,13 @@ class TtsController extends Notifier<TtsPlaybackState> {
     required String messageId,
     required String sentenceId,
   }) {
+    final defaultVoice = defaultVoiceFor(settings.preferredLanguage);
+    final voiceId =
+        settings.voiceFor(settings.preferredLanguage, defaultVoice.id);
     return TtsRequest(
       text: text,
       language: settings.preferredLanguage.code,
-      voiceId: 'default',
+      voiceId: voiceId,
       speed: settings.speechSpeed,
     );
   }

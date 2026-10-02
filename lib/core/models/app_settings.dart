@@ -33,6 +33,7 @@ class AppSettings {
     required this.autoPlay,
     required this.saveHistory,
     this.lastConversationId,
+    this.selectedVoices = const <CoachLanguage, String>{},
   });
 
   final CoachLanguage preferredLanguage;
@@ -45,6 +46,17 @@ class AppSettings {
   /// after the user explicitly clears history. Stored in the SQLite settings
   /// table so the chat page can resume the right bubble on cold start.
   final String? lastConversationId;
+
+  /// User-selected voice id per language. Missing entries fall back to the
+  /// language default at the point of use (TTS request builder).
+  final Map<CoachLanguage, String> selectedVoices;
+
+  /// Voice id for [language] — either the user-picked one or the language
+  /// default. Pure function so widget tests + JSON round-trips can call it
+  /// without dragging in the catalog.
+  String voiceFor(CoachLanguage language, String defaultVoiceId) {
+    return selectedVoices[language] ?? defaultVoiceId;
+  }
 
   /// Values the audio pipeline accepts. Anything outside this set is
   /// rejected by [fromJson] / [copyWith] so the UI can never feed an invalid
@@ -74,6 +86,7 @@ class AppSettings {
     bool? saveHistory,
     String? lastConversationId,
     bool clearLastConversationId = false,
+    Map<CoachLanguage, String>? selectedVoices,
   }) {
     final nextSpeed = speechSpeed ?? this.speechSpeed;
     if (!allowedSpeechSpeeds.contains(nextSpeed)) {
@@ -92,6 +105,7 @@ class AppSettings {
       lastConversationId: clearLastConversationId
           ? null
           : (lastConversationId ?? this.lastConversationId),
+      selectedVoices: selectedVoices ?? this.selectedVoices,
     );
   }
 
@@ -116,6 +130,18 @@ class AppSettings {
     };
     final speed = allowedSpeechSpeeds.contains(speedParsed) ? speedParsed : 1.0;
 
+    final voicesRaw = raw['selectedVoices'];
+    final selectedVoices = <CoachLanguage, String>{};
+    if (voicesRaw is Map) {
+      voicesRaw.forEach((key, value) {
+        final lang = CoachLanguage.values.firstWhere(
+          (l) => l.name == key,
+          orElse: () => CoachLanguage.english,
+        );
+        if (value is String) selectedVoices[lang] = value;
+      });
+    }
+
     return AppSettings(
       preferredLanguage: language,
       provider: provider,
@@ -123,6 +149,7 @@ class AppSettings {
       autoPlay: raw['autoPlay'] == true,
       saveHistory: raw['saveHistory'] != false,
       lastConversationId: raw['lastConversationId']?.toString(),
+      selectedVoices: selectedVoices,
     );
   }
 
@@ -133,5 +160,7 @@ class AppSettings {
         'autoPlay': autoPlay,
         'saveHistory': saveHistory,
         'lastConversationId': lastConversationId,
+        'selectedVoices':
+            selectedVoices.map((k, v) => MapEntry(k.name, v)),
       };
 }

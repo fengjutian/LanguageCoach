@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/ai/llm_event.dart';
 import '../../core/ai/llm_provider.dart';
 import '../../core/ai/minimax_provider.dart';
+import '../../core/audio/voice_profile.dart';
 import '../../core/audio/model_manager.dart';
 import '../../core/models/app_settings.dart';
 import '../../core/models/chat_models.dart';
@@ -108,6 +109,31 @@ class SettingsPage extends ConsumerWidget {
                 ],
               ),
             ),
+            ListTile(
+              leading: const Icon(Icons.record_voice_over_outlined),
+              title: const Text('首选语言语音'),
+              subtitle: Text(_voiceLabel(settings)),
+              trailing: DropdownButton<String>(
+                value: _currentVoiceId(settings),
+                underline: const SizedBox.shrink(),
+                onChanged: (value) {
+                  if (value != null) {
+                    controller.setVoiceForLanguage(
+                      settings.preferredLanguage,
+                      value,
+                    );
+                  }
+                },
+                items: _voicesForLanguage(settings.preferredLanguage)
+                    .map(
+                      (v) => DropdownMenuItem(
+                        value: v.id,
+                        child: Text(v.label),
+                      ),
+                    )
+                    .toList(),
+              ),
+            ),
             const _SectionTitle('会话'),
             SwitchListTile(
               title: const Text('保存聊天记录'),
@@ -137,6 +163,26 @@ class SettingsPage extends ConsumerWidget {
     );
   }
 }
+
+/// Voice id currently selected for the user's preferred language, falling
+/// back to the catalog default if nothing has been picked yet.
+String _currentVoiceId(AppSettings settings) {
+  final candidates = voicesFor(settings.preferredLanguage);
+  final picked = settings.selectedVoices[settings.preferredLanguage];
+  if (picked != null && candidates.any((v) => v.id == picked)) {
+    return picked;
+  }
+  return candidates.first.id;
+}
+
+String _voiceLabel(AppSettings settings) {
+  final id = _currentVoiceId(settings);
+  return voiceById(id)?.label ?? id;
+}
+
+List<VoiceProfile> _voicesForLanguage(CoachLanguage language) =>
+    voicesFor(language);
+
 
 class _ApiKeysSection extends ConsumerWidget {
   const _ApiKeysSection();
