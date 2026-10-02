@@ -191,10 +191,9 @@ class TtsBenchmarkController extends Notifier<BenchmarkState> {
     if (manifest == null) return;
     state = state.copyWith(busy: true);
     final stopwatch = Stopwatch()..start();
-    String? audioPath;
     String? errorMessage;
     try {
-      audioPath = await _bridge.synthesize(
+      await _bridge.synthesize(
         text: text,
         language: 'en',
         voice: 'default',
@@ -218,10 +217,6 @@ class TtsBenchmarkController extends Notifier<BenchmarkState> {
       ],
     );
     await _refreshSnapshot();
-    // Suppress unused — the path is left for the caller to inspect via
-    // the debug panel; native side has already written the wav.
-    // ignore: unused_local_variable
-    audioPath;
   }
 
   Future<void> cancel() async {
