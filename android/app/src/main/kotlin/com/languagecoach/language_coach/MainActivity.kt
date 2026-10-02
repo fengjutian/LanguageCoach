@@ -22,6 +22,7 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, RecognitionL
     private var pendingLanguage: String = "en-US"
     private var ttsService: TtsService? = null
     private var asrService: AsrService? = null
+    private var llmService: LlmService? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -36,6 +37,12 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, RecognitionL
         val asrCache = File(filesDir, "asr_scratch")
         if (!asrCache.exists()) asrCache.mkdirs()
         asrService = AsrService(this, asrCache, ::emit)
+
+        val llmCache = File(filesDir, "llm_scratch")
+        if (!llmCache.exists()) llmCache.mkdirs()
+        llmService = LlmService(llmCache) { type, sessionId, payload ->
+            eventSink?.success(mapOf("type" to type, "sessionId" to sessionId, "payload" to payload))
+        }
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, COMMANDS_CHANNEL)
             .setMethodCallHandler { call, result ->
@@ -55,11 +62,53 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, RecognitionL
                     }
                     "isSpeechRecognitionAvailable" ->
                         result.success(SpeechRecognizer.isRecognitionAvailable(this))
-                    "generate" -> result.error(
-                        "MODEL_NOT_CONFIGURED",
-                        "Native LLM runtime is not configured yet.",
-                        null,
-                    )
+                    "loadLlmModel" -> {
+                        val modelId = call.argument<String>("modelId") ?: ""
+                        val manifestJson = call.argument<String>("manifestJson")
+                        val localDirectory = call.argument<String>("localDirectory")
+                        val echoed = try {
+                            llmService?.loadLlmModel(modelId, manifestJson, localDirectory)
+                        } catch (e: Throwable) {
+                            null
+                        }
+                        if (echoed == null) {
+                            result.error(
+                                "LLM_LOAD_FAILED",
+                                "Local LLM artifacts are missing for $modelId",
+                                null,
+                            )
+                        } else {
+                            result.success(echoed)
+                        }
+                    }
+                    "startLlmGeneration" -> {
+                        val sessionId = call.argument<String>("sessionId") ?: ""
+                        val prompt = call.argument<String>("prompt").orEmpty()
+                        val modelId = call.argument<String>("modelId") ?: ""
+                        val started = llmService?.startLlmGeneration(sessionId, prompt, modelId)
+                        if (started == null) {
+                            result.error(
+                                "LLM_NOT_LOADED",
+                                "Local LLM runtime is not loaded or sessionId already in use.",
+                                null,
+                            )
+                        } else {
+                            result.success(started)
+                        }
+                    }
+                    "cancelLlmGeneration" -> {
+                        val sessionId = call.argument<String>("sessionId") ?: ""
+                        llmService?.cancelLlmGeneration(sessionId)
+                        result.success(null)
+                    }
+                    "unloadLlmModel" -> {
+                        val modelId = call.argument<String>("modelId") ?: ""
+                        llmService?.unloadLlmModel(modelId)
+                        result.success(null)
+                    }
+                    "listLlmModels" -> {
+                        result.success(llmService?.listInstalledModels() ?: emptyList<Map<String, Any?>>())
+                    }
                     "synthesize" -> {
                         val text = call.argument<String>("text").orEmpty()
                         val language = call.argument<String>("language") ?: "en-US"
@@ -265,6 +314,7 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, RecognitionL
         speechRecognizer = null
         ttsService?.unloadModel("default")
         asrService?.cancelCapture()
+        llmService?.unloadLlmModel("qwen3-llm-0.6B")
         super.onDestroy()
     }
 

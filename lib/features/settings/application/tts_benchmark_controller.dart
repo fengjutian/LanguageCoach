@@ -291,10 +291,6 @@ class _StubBridge implements NativeAiBridge {
   @override
   Stream<Object?> get eventStream => const Stream.empty();
   @override
-  Future<Map<Object?, Object?>?> generate(
-          {required String prompt, required String model}) async =>
-      null;
-  @override
   Future<String?> synthesize({
     required String text,
     required String language,
@@ -348,4 +344,26 @@ class _StubBridge implements NativeAiBridge {
   Future<void> stopListening() async {}
   @override
   Future<void> cancelListening() async {}
+  @override
+  Future<String?> loadLlmModel({
+    required String modelId,
+    String? manifestJson,
+    String? localDirectory,
+  }) async =>
+      null;
+  @override
+  Future<String?> startLlmGeneration({
+    required String sessionId,
+    required String prompt,
+    required String modelId,
+    int? maxTokens,
+    double? temperature,
+  }) async =>
+      null;
+  @override
+  Future<void> cancelLlmGeneration({required String sessionId}) async {}
+  @override
+  Future<void> unloadLlmModel({required String modelId}) async {}
+  @override
+  Future<List<Map<Object?, Object?>>> listLlmModels() async => const [];
 }

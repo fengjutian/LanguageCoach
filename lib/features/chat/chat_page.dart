@@ -13,8 +13,13 @@ import '../../core/native/native_ai_bridge.dart';
 import '../../core/network/api_client.dart';
 import '../../core/repositories/sqlite_conversation_repository.dart';
 import '../settings/application/settings_controller.dart';
+import 'application/chat_session_state.dart';
 import 'application/conversation_providers.dart';
+import 'application/waveform_controller.dart';
 import 'widgets/message_bubble.dart';
+import 'widgets/session_character.dart';
+import 'widgets/session_error_card.dart';
+import 'widgets/waveform_view.dart';
 
 class ChatPage extends ConsumerStatefulWidget {
   const ChatPage({super.key});
@@ -351,6 +356,8 @@ class _ChatPageState extends ConsumerState<ChatPage> {
 
   @override
   Widget build(BuildContext context) {
+    final phase = ref.watch(chatSessionPhaseProvider);
+    final error = ref.watch(chatSessionErrorProvider);
     return Column(
       children: [
         const _Header(),
@@ -375,6 +382,10 @@ class _ChatPageState extends ConsumerState<ChatPage> {
                     );
                   },
                 ),
+        ),
+        _SessionStatusStrip(
+          phase: phase,
+          error: error,
         ),
         _Composer(
           controller: controller,
@@ -549,4 +560,74 @@ class _ErrorBubble extends StatelessWidget {
   }
 }
 
-// kept for IDE reference; nothing else to anchor here.
+/// Status strip above the composer — shows the placeholder character
+/// during the recording/processing/playing phases, the live waveform
+/// while ASR is producing samples, and a retry card when the session
+/// has surfaced an error. Idle = nothing.
+class _SessionStatusStrip extends ConsumerWidget {
+  const _SessionStatusStrip({
+    required this.phase,
+    required this.error,
+  });
+
+  final ChatSessionPhase phase;
+  final SessionError? error;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    if (error != null) {
+      return SessionErrorCard(error: error!);
+    }
+    if (phase == ChatSessionPhase.recording) {
+      // Reset the buffer on phase entry so the waveform only shows
+      // samples from the active session.
+      ref.listen<ChatSessionPhase>(chatSessionPhaseProvider, (prev, next) {
+        if (prev == ChatSessionPhase.recording && next != ChatSessionPhase.recording) {
+          ref.read(waveformControllerProvider.notifier).reset();
+        }
+      });
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Row(
+          children: [
+            const SessionCharacter(phase: ChatSessionPhase.recording, size: 48),
+            const SizedBox(width: 12),
+            const Expanded(child: WaveformView()),
+          ],
+        ),
+      );
+    }
+    if (phase == ChatSessionPhase.processing ||
+        phase == ChatSessionPhase.playing) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Row(
+          children: [
+            SessionCharacter(phase: phase, size: 48),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                _labelFor(phase),
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+    return const SizedBox.shrink();
+  }
+
+  String _labelFor(ChatSessionPhase phase) {
+    switch (phase) {
+      case ChatSessionPhase.processing:
+        return '正在生成回复…';
+      case ChatSessionPhase.playing:
+        return '正在播放';
+      case ChatSessionPhase.idle:
+      case ChatSessionPhase.recording:
+      case ChatSessionPhase.error:
+        return '';
+    }
+  }
+}

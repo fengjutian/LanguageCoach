@@ -54,12 +54,14 @@ class ModelDownloadService {
 
     events.add(ModelDownloadStarted(id, manifest.sizeBytes));
 
+    // Range download — if the partial file already exists we resume
+    // from its byte length.
+    final existing = File(tempPath).existsSync()
+        ? File(tempPath).lengthSync()
+        : 0;
+    var downloaded = existing;
+
     try {
-      // Range download — if the partial file already exists we resume
-      // from its byte length.
-      final existing = File(tempPath).existsSync()
-          ? File(tempPath).lengthSync()
-          : 0;
       final headers = <String, Object?>{
         if (existing > 0) 'Range': 'bytes=$existing-',
       };
@@ -78,7 +80,6 @@ class ModelDownloadService {
 
       final raf = File(tempPath).openWrite(mode: existing == 0 ? FileMode.write : FileMode.append);
       try {
-        var downloaded = existing;
         final total = manifest.sizeBytes == 0
             ? (int.tryParse(response.headers.value('content-length') ?? '') ?? 0)
             : manifest.sizeBytes + existing;
@@ -123,6 +124,13 @@ class ModelDownloadService {
       events.add(ModelInstalled(id, installPath));
       return installPath;
     } on DioException catch (e) {
+      if (state.paused) {
+        // Pause path: the cancel token triggered the DioException, but
+        // the operator asked for a pause — surface that as Paused, not
+        // Errored. The partial bytes are already on disk.
+        events.add(ModelDownloadPaused(id, downloaded));
+        return null;
+      }
       final kind = switch (e.type) {
         DioExceptionType.cancel => ModelErrorKind.cancelled,
         DioExceptionType.connectionError ||
@@ -148,6 +156,10 @@ class ModelDownloadService {
     final state = _active[modelId];
     if (state == null) return;
     state.paused = true;
+    // Cancelling the token unblocks the in-flight `await for` loop; the
+    // DioException handler above recognises `state.paused` and surfaces
+    // a Paused event instead of Errored(cancelled).
+    state.cancelToken?.cancel('paused');
   }
 
   Future<void> cancel(String modelId) async {
@@ -173,9 +185,7 @@ class ModelDownloadService {
   }
 
   ModelManifest? manifestFor(String modelId) {
-    for (final m in [
-      ...qwen3Tts06BArchive(),
-    ]) {
+    for (final m in knownModels()) {
       if (m.id == modelId) return m;
     }
     return null;
@@ -183,9 +193,9 @@ class ModelDownloadService {
 }
 
 /// Stand-in list until the model release ships real manifests. Mirrors
-/// the constant defined in `model_manifest.dart` but returns a fresh list
+/// the constants defined in `model_manifest.dart` but returns a fresh list
 /// each call so the download service does not retain global state.
-List<ModelManifest> qwen3Tts06BArchive() => [qwen3Tts06B];
+List<ModelManifest> knownModels() => [qwen3Tts06B, qwen3Llm06B];
 
 Future<String> _sha256OfFile(String path) async {
   final digest = await sha256.bind(File(path).openRead().cast<List<int>>()).first;

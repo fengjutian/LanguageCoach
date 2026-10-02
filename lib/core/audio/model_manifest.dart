@@ -80,6 +80,44 @@ class ModelArtifact {
   final String role;
 }
 
+/// The Qwen3-LLM 0.6B manifest — the local reasoning engine that powers
+/// `LocalQwenProvider` in P1-6. Layout is intentionally close to the TTS
+/// manifest (tokenizer + weights + config) so the same `ModelDownloadService`
+/// pipeline can install it. Real SHA-256 / URL land with the model release.
+const ModelManifest qwen3Llm06B = ModelManifest(
+  id: 'qwen3-llm-0.6B',
+  type: 'llm',
+  version: '0.6.0',
+  label: 'Qwen3 LLM 0.6B (Local)',
+  sizeBytes: 0,
+  downloadUrl: 'https://example.invalid/qwen3-llm-0.6B.tar.gz',
+  sha256: 'PLACEHOLDER_SHA256',
+  minimumRamMb: 4096,
+  supportedAbis: <String>['arm64-v8a'],
+  notes: 'Placeholder manifest. Real SHA-256 and URL land with the model '
+      'release in P1-6.',
+  artifacts: <ModelArtifact>[
+    ModelArtifact(
+      relativePath: 'tokenizer.json',
+      sizeBytes: 0,
+      sha256: 'PLACEHOLDER_LLM_TOKENIZER_SHA256',
+      role: 'tokenizer',
+    ),
+    ModelArtifact(
+      relativePath: 'llm_qwen.bin',
+      sizeBytes: 0,
+      sha256: 'PLACEHOLDER_LLM_WEIGHTS_SHA256',
+      role: 'llm_weights',
+    ),
+    ModelArtifact(
+      relativePath: 'llm_config.json',
+      sizeBytes: 0,
+      sha256: 'PLACEHOLDER_LLM_CONFIG_SHA256',
+      role: 'llm_config',
+    ),
+  ],
+);
+
 /// The Qwen3-TTS 0.6B manifest. Numbers below are placeholders — the real
 /// release ships a published checksum and URL. P1-3 verifies the runtime
 /// can load a manifest like this; the actual fetch lands in P1-5.

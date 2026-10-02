@@ -11,11 +11,37 @@ import 'package:flutter/services.dart';
 abstract interface class NativeAiBridge {
   Stream<Object?> get eventStream;
 
-  // ---------- LLM (P0-2 retained for completeness) ----------
-  Future<Map<Object?, Object?>?> generate({
-    required String prompt,
-    required String model,
+  // ---------- LLM (P1-6 native) ----------
+  /// Load [modelId] into the native LLM runtime. Returns the echoed
+  /// `modelId` once the runtime is resident; `null` if the model files
+  /// are missing on disk.
+  Future<String?> loadLlmModel({
+    required String modelId,
+    String? manifestJson,
+    String? localDirectory,
   });
+
+  /// Start a streaming generation. Returns a `sessionId` the caller can
+  /// pass back to [cancelLlmGeneration] and use to filter tokens out of
+  /// [eventStream]. Returns `null` if the runtime rejected the request
+  /// (no model loaded, model not ready, etc).
+  Future<String?> startLlmGeneration({
+    required String sessionId,
+    required String prompt,
+    required String modelId,
+    int? maxTokens,
+    double? temperature,
+  });
+
+  /// Cancel an in-flight generation. No-op if [sessionId] is unknown.
+  Future<void> cancelLlmGeneration({required String sessionId});
+
+  /// Releases the runtime binding for [modelId]. Disk artifacts stay.
+  Future<void> unloadLlmModel({required String modelId});
+
+  /// Snapshot of every LLM the runtime knows about, regardless of
+  /// whether the artifacts are installed. Mirrors `listAsrProfiles`.
+  Future<List<Map<Object?, Object?>>> listLlmModels();
 
   // ---------- TTS (P1-3) ----------
   Future<String?> synthesize({
@@ -91,11 +117,49 @@ class DefaultBridge implements NativeAiBridge {
   Stream<Object?> get eventStream => _events.receiveBroadcastStream();
 
   @override
-  Future<Map<Object?, Object?>?> generate({
-    required String prompt,
-    required String model,
+  Future<String?> loadLlmModel({
+    required String modelId,
+    String? manifestJson,
+    String? localDirectory,
   }) =>
-      _commands.invokeMapMethod('generate', {'prompt': prompt, 'model': model});
+      _commands.invokeMethod<String>('loadLlmModel', {
+        'modelId': modelId,
+        'manifestJson': manifestJson,
+        'localDirectory': localDirectory,
+      });
+
+  @override
+  Future<String?> startLlmGeneration({
+    required String sessionId,
+    required String prompt,
+    required String modelId,
+    int? maxTokens,
+    double? temperature,
+  }) =>
+      _commands.invokeMethod<String>('startLlmGeneration', {
+        'sessionId': sessionId,
+        'prompt': prompt,
+        'modelId': modelId,
+        'maxTokens': maxTokens,
+        'temperature': temperature,
+      });
+
+  @override
+  Future<void> cancelLlmGeneration({required String sessionId}) =>
+      _commands.invokeMethod<void>('cancelLlmGeneration', {
+        'sessionId': sessionId,
+      });
+
+  @override
+  Future<void> unloadLlmModel({required String modelId}) =>
+      _commands.invokeMethod<void>('unloadLlmModel', {'modelId': modelId});
+
+  @override
+  Future<List<Map<Object?, Object?>>> listLlmModels() async {
+    final raw =
+        await _commands.invokeMethod<List<Object?>>('listLlmModels');
+    return raw?.cast<Map<Object?, Object?>>() ?? const [];
+  }
 
   @override
   Future<String?> synthesize({
@@ -274,5 +338,45 @@ AccuracyTier _tierFromString(String? raw) {
       return AccuracyTier.medium;
     default:
       return AccuracyTier.small;
+  }
+}
+
+/// One token-shaped payload from the LLM runtime. The Kotlin side stamps
+/// every event with the [sessionId] the Dart caller chose via `startLlmGeneration`,
+/// so this class filters on the way through.
+class LlmStreamEvent {
+  LlmStreamEvent({
+    required this.sessionId,
+    required this.type,
+    required this.payload,
+  });
+  final String sessionId;
+  final String type;
+  final Map<Object?, Object?> payload;
+}
+
+/// Helper to bridge Kotlin event payloads into typed Dart objects for the
+/// LLM runtime. The same trick as [NativeAsrEventDecoder]: events arrive as
+/// `{'type': 'LLM_*', 'sessionId': '...', 'payload': {...}}`.
+extension NativeLlmEventDecoder on Object? {
+  /// Returns the event payload + session id if the frame is an LLM event,
+  /// `null` for everything else (so a single listener can multiplex ASR,
+  /// TTS and LLM frames without leaking each other's payloads).
+  LlmStreamEvent? toLlmStreamEvent() {
+    if (this is! Map) return null;
+    final map = this as Map;
+    if (map['type'] is! String) return null;
+    final type = map['type'] as String;
+    if (!type.startsWith('LLM_')) return null;
+    final sessionId = (map['sessionId'] as String?) ?? '';
+    final payloadRaw = map['payload'];
+    final payload = payloadRaw is Map
+        ? payloadRaw.cast<Object?, Object?>()
+        : const <Object?, Object?>{};
+    return LlmStreamEvent(
+      sessionId: sessionId,
+      type: type,
+      payload: payload,
+    );
   }
 }

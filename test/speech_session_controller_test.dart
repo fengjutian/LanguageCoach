@@ -20,9 +20,42 @@ class _ScriptedBridge implements NativeAiBridge {
   Stream<Object?> get eventStream => _eventController.stream;
 
   @override
-  Future<Map<Object?, Object?>?> generate(
-          {required String prompt, required String model}) async =>
-      null;
+  Future<String?> loadLlmModel({
+    required String modelId,
+    String? manifestJson,
+    String? localDirectory,
+  }) async {
+    methodCalls.add('loadLlmModel:$modelId');
+    return modelId;
+  }
+
+  @override
+  Future<String?> startLlmGeneration({
+    required String sessionId,
+    required String prompt,
+    required String modelId,
+    int? maxTokens,
+    double? temperature,
+  }) async {
+    methodCalls.add('startLlmGeneration:$sessionId:$modelId');
+    return sessionId;
+  }
+
+  @override
+  Future<void> cancelLlmGeneration({required String sessionId}) async {
+    methodCalls.add('cancelLlmGeneration:$sessionId');
+  }
+
+  @override
+  Future<void> unloadLlmModel({required String modelId}) async {
+    methodCalls.add('unloadLlmModel:$modelId');
+  }
+
+  @override
+  Future<List<Map<Object?, Object?>>> listLlmModels() async {
+    methodCalls.add('listLlmModels');
+    return const [];
+  }
 
   @override
   Future<String?> synthesize({

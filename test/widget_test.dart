@@ -1,24 +1,50 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:language_coach/core/audio/audio_player.dart';
+import 'package:language_coach/core/audio/model_download_service.dart';
+import 'package:language_coach/core/audio/model_manager.dart';
+import 'package:language_coach/core/audio/model_manifest.dart';
 import 'package:language_coach/core/database/app_database_provider.dart';
 import 'package:language_coach/core/models/app_settings.dart';
 import 'package:language_coach/core/repositories/in_memory_repositories.dart';
 import 'package:language_coach/features/chat/application/tts_controller.dart';
 import 'package:language_coach/features/home/home_page.dart';
+import 'package:language_coach/features/settings/application/model_controller.dart';
 import 'package:language_coach/features/settings/application/settings_controller.dart';
 import 'package:language_coach/features/settings/settings_page.dart';
 
-Widget _wrap(Widget child) => ProviderScope(
-      overrides: [
-        settingsRepositoryProvider
-            .overrideWithValue(InMemorySettingsRepository()),
-      ],
-      child: MaterialApp(home: Scaffold(body: child)),
-    );
+/// Test double for the model download service. Has no in-flight manifests
+/// so widget tests never trigger a download.
+class _EmptyModelService extends ModelDownloadService {
+  _EmptyModelService({required super.rootDirectory, required super.events});
+
+  @override
+  ModelManifest? manifestFor(String modelId) => null;
+}
+
+StreamController<ModelEvent> _newEvents() {
+  final controller = StreamController<ModelEvent>.broadcast();
+  addTearDown(controller.close);
+  return controller;
+}
+
+Widget _wrap(Widget child, {Directory? tmp}) {
+  final root = tmp ?? Directory.systemTemp.createTempSync('widget_test_root_');
+  return ProviderScope(
+    overrides: [
+      settingsRepositoryProvider
+          .overrideWithValue(InMemorySettingsRepository()),
+      modelDownloadServiceProvider.overrideWithValue(
+        _EmptyModelService(rootDirectory: root, events: _newEvents()),
+      ),
+    ],
+    child: MaterialApp(home: Scaffold(body: child)),
+  );
+}
 
 ProviderContainer _containerFor(WidgetTester tester, Finder finder) =>
     ProviderScope.containerOf(tester.element(finder));
@@ -55,14 +81,17 @@ void main() {
   testWidgets('HomePage mounts Chat, History, Settings tabs', (tester) async {
     final settings = InMemorySettingsRepository();
     final conversations = InMemoryConversationRepository();
+    final tmp = Directory.systemTemp.createTempSync('home_test_root_');
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
           settingsRepositoryProvider.overrideWithValue(settings),
           conversationRepositoryProvider.overrideWithValue(conversations),
           audioPlayerServiceProvider.overrideWithValue(InMemoryAudioPlayer()),
-          ttsOutputDirectoryProvider.overrideWithValue(
-              Directory.systemTemp.createTempSync('home_test_')),
+          ttsOutputDirectoryProvider.overrideWithValue(tmp),
+          modelDownloadServiceProvider.overrideWithValue(
+            _EmptyModelService(rootDirectory: tmp, events: _newEvents()),
+          ),
         ],
         child: const MaterialApp(home: HomePage()),
       ),

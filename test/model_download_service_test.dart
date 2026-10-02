@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
@@ -14,10 +15,9 @@ import 'package:language_coach/core/audio/model_manifest.dart';
 ///   * `paused`  — yields the first chunk then hangs; the test calls
 ///                 [ModelDownloadService.pause] and expects a paused event.
 class _FakeAdapter implements HttpClientAdapter {
-  _FakeAdapter({this.mode = 'success', this.body = _defaultBody});
+  _FakeAdapter({this.mode = 'success'});
 
   final String mode;
-  final List<int> body;
 
   static const _defaultBody = <int>[
     0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80,
@@ -39,25 +39,28 @@ class _FakeAdapter implements HttpClientAdapter {
     lastRangeHeader = options.headers['Range'] as String?;
     if (mode == 'paused') {
       final controller = StreamController<Uint8List>();
-      controller.add(Uint8List.fromList(body.sublist(0, 4)));
+      // Yield the first chunk and then leave the stream open — the test
+      // calls `service.pause(...)`, which cancels the underlying dio
+      // request and surfaces a Paused event.
+      controller.add(Uint8List.fromList(_defaultBody.sublist(0, 4)));
       return ResponseBody(
         controller.stream,
         200,
         headers: {
-          Headers.contentLengthHeader: [body.length.toString()],
+          Headers.contentLengthHeader: [_defaultBody.length.toString()],
         },
       );
     }
     final controller = StreamController<Uint8List>();
     Future(() {
-      controller.add(Uint8List.fromList(body));
+      controller.add(Uint8List.fromList(_defaultBody));
       controller.close();
     });
     return ResponseBody(
       controller.stream,
       200,
       headers: {
-        Headers.contentLengthHeader: [body.length.toString()],
+        Headers.contentLengthHeader: [_defaultBody.length.toString()],
       },
     );
   }
@@ -83,7 +86,17 @@ void main() {
 
     tearDown(() async {
       await events.close();
-      if (tmp.existsSync()) tmp.deleteSync(recursive: true);
+      // Give the dio adapter a moment to release its handle on the temp
+      // directory before we delete it.
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      if (tmp.existsSync()) {
+        try {
+          tmp.deleteSync(recursive: true);
+        } catch (_) {
+          // best-effort — Windows can refuse the delete if a child stream
+          // is still alive.
+        }
+      }
     });
 
     test('happy path emits Started → Progress → Verifying → Installed',
@@ -116,13 +129,15 @@ void main() {
       final actual = await sha256.bind(File(path).openRead()).first;
       expect(actual.toString(), manifest.sha256);
 
+      // Flush the broadcast stream listeners before we tally events.
+      await Future<void>.delayed(Duration.zero);
       final types = received.map((e) => e.runtimeType).toList();
       expect(types, [
         ModelDownloadStarted,
         ModelDownloadProgress,
         ModelVerifying,
         ModelInstalled,
-      ].map((t) => t.toString()).toList());
+      ]);
     });
 
     test('pause mid-stream emits a Paused event and keeps the partial file',
@@ -154,11 +169,14 @@ void main() {
 
       // Partial file exists with the bytes we wrote.
       final partial = File(
-        '${root.path}/qwen3-tts-0.6B/0.6.0.partial',
+        '${root.path}/models/qwen3-tts-0.6B/0.6.0.partial',
       );
       expect(partial.existsSync(), isTrue);
       expect(partial.lengthSync(), greaterThan(0));
 
+      // Flush the broadcast stream so the Paused event has been delivered
+      // before we count it.
+      await Future<void>.delayed(Duration.zero);
       expect(
         received.whereType<ModelDownloadPaused>().length,
         1,
@@ -184,6 +202,10 @@ void main() {
       );
       final path = await service.download(manifest);
       expect(path, isNull);
+      // Let the broadcast stream flush any remaining events before we
+      // assert on them — broadcast streams drop events for late
+      // listeners but `add` may be queued in microtasks.
+      await Future<void>.delayed(Duration.zero);
       expect(
         received.whereType<ModelErrored>().first.kind,
         ModelErrorKind.checksumMismatch,
