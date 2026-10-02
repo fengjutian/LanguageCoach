@@ -6,7 +6,6 @@ import 'package:path_provider/path_provider.dart';
 
 import 'app/language_coach_app.dart';
 import 'core/audio/audio_cache.dart';
-import 'core/audio/audio_player.dart';
 import 'core/audio/just_audio_player.dart';
 import 'core/database/app_database.dart';
 import 'core/database/app_database_provider.dart';

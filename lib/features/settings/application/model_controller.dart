@@ -77,17 +77,18 @@ class ModelController extends Notifier<ModelListState> {
       _eventSub = service.events.stream.listen(_onEvent);
     }
     ref.onDispose(() => _eventSub?.cancel());
-    final entries = (manager?.installedModels() ?? const <InstalledModelRecord>[])
-        .map(_toEntry)
-        .toList();
+    final entries =
+        (manager?.installedModels() ?? const <InstalledModelRecord>[])
+            .map(_toEntry)
+            .toList();
     return ModelListState(entries: entries, lastEvent: null);
   }
 
   Future<void> download(String modelId) async {
     final service = ref.read(modelDownloadServiceProvider);
     final manager = ref.read(modelManagerProvider);
-    final manifest = (service?.manifestFor(modelId)) ??
-        (manager?.manifestFor(modelId));
+    final manifest =
+        (service?.manifestFor(modelId)) ?? (manager?.manifestFor(modelId));
     if (manifest == null) return;
     if (service != null) {
       await service.download(manifest);
@@ -174,7 +175,8 @@ class ModelController extends Notifier<ModelListState> {
 
   void _refreshEntries() {
     final manager = ref.read(modelManagerProvider);
-    final records = manager?.installedModels() ?? const <InstalledModelRecord>[];
+    final records =
+        manager?.installedModels() ?? const <InstalledModelRecord>[];
     state = state.copyWith(entries: records.map(_toEntry).toList());
   }
 
@@ -182,12 +184,13 @@ class ModelController extends Notifier<ModelListState> {
     final manifest = _manifestFor(record.id);
     final last = state.lastEvent;
     final bytesTotal = manifest?.sizeBytes ?? record.sizeBytes;
-    final downloaded = last is ModelDownloadProgress && last.modelId == record.id
-        ? last.bytesDownloaded
-        : (record.status == ModelDownloadStatus.installed ||
-                record.status == ModelDownloadStatus.loaded)
-            ? bytesTotal
-            : 0;
+    final downloaded =
+        last is ModelDownloadProgress && last.modelId == record.id
+            ? last.bytesDownloaded
+            : (record.status == ModelDownloadStatus.installed ||
+                    record.status == ModelDownloadStatus.loaded)
+                ? bytesTotal
+                : 0;
     return ModelEntry(
       manifest: manifest ?? _placeholderManifest(record),
       status: record.status,
@@ -219,13 +222,22 @@ class ModelController extends Notifier<ModelListState> {
     );
   }
 
-  Future<bool> _verifyLocally(String modelId, ModelDownloadService? service) async {
+  Future<bool> _verifyLocally(
+      String modelId, ModelDownloadService? service) async {
     if (service == null) return false;
     final manifest = service.manifestFor(modelId);
     if (manifest == null) return false;
-    final installPath = '${service.rootDirectory.path}/models/${manifest.id}/${manifest.version}';
+    final installPath =
+        '${service.rootDirectory.path}/models/${manifest.id}/${manifest.version}';
     final f = File(installPath);
-    if (!f.existsSync()) return false;
-    return manifest.sha256 == 'PLACEHOLDER_SHA256';
+    if (f.existsSync()) return manifest.sha256 == 'PLACEHOLDER_SHA256';
+
+    final directory = Directory(installPath);
+    if (!directory.existsSync() || manifest.artifacts.isEmpty) return false;
+    return manifest.artifacts.every((artifact) {
+      final artifactFile = File('$installPath/${artifact.relativePath}');
+      return artifactFile.existsSync() &&
+          artifactFile.lengthSync() == artifact.sizeBytes;
+    });
   }
 }

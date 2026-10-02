@@ -135,9 +135,4 @@ class ApiClient {
         return const LlmError(LlmErrorKind.network, 'network unavailable');
     }
   }
-
-  /// Hook used by tests so they can replace the underlying [Dio] (e.g. with
-  /// a `DioAdapter`).
-  // ignore: unused_element
-  Dio get _internalDio => _dio;
 }

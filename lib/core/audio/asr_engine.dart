@@ -24,8 +24,6 @@ abstract interface class AudioCaptureService {
 /// Voice-activity detection. Real impl is a sherpa-onnx VAD; the in-memory
 /// test impl always reports `speech`.
 abstract interface class VadEngine {
-  Stream<VadEvent> get eventStream;
-
   /// Feed the VAD with the same PCM frames the ASR sees. The VAD is
   /// stateless — it just classifies windows of input.
   void feed(PcmFrame frame);
@@ -34,23 +32,6 @@ abstract interface class VadEngine {
   /// the VAD still considers them as speaking — the runtime fires this so
   /// the UI can auto-stop.
   Future<void> dispose();
-}
-
-sealed class VadEvent {
-  const VadEvent();
-}
-
-class VadSpeechStart extends VadEvent {
-  const VadSpeechStart();
-}
-
-class VadSpeechEnd extends VadEvent {
-  const VadSpeechEnd();
-}
-
-class VadSilenceTimeout extends VadEvent {
-  const VadSilenceTimeout(this.elapsedMs);
-  final int elapsedMs;
 }
 
 /// One streaming ASR backend. Implementations include sherpa-onnx

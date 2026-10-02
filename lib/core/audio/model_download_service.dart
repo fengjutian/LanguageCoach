@@ -48,14 +48,6 @@ class ModelDownloadService {
     state.cancelToken = CancelToken();
     state.paused = false;
 
-    if (manifest.sha256.isEmpty && manifest.artifacts.isNotEmpty) {
-      try {
-        return await _downloadRepository(manifest, state);
-      } finally {
-        _active.remove(id);
-      }
-    }
-
     final installPath = _installPath(manifest);
     final tempPath = '$installPath.partial';
     await Directory(installPath).parent.create(recursive: true);
@@ -64,9 +56,8 @@ class ModelDownloadService {
 
     // Range download — if the partial file already exists we resume
     // from its byte length.
-    final existing = File(tempPath).existsSync()
-        ? File(tempPath).lengthSync()
-        : 0;
+    final existing =
+        File(tempPath).existsSync() ? File(tempPath).lengthSync() : 0;
     var downloaded = existing;
 
     try {
@@ -86,7 +77,8 @@ class ModelDownloadService {
         cancelToken: state.cancelToken,
       );
 
-      final raf = File(tempPath).openWrite(mode: existing == 0 ? FileMode.write : FileMode.append);
+      final raf = File(tempPath)
+          .openWrite(mode: existing == 0 ? FileMode.write : FileMode.append);
       // `IOSink.close()` is idempotent at the OS level but the Dart wrapper
       // throws on the second call (`FileSystemException: File already
       // closed`). Guard with a flag — earlier code closed three times in the
@@ -98,9 +90,11 @@ class ModelDownloadService {
         rafClosed = true;
         await raf.close();
       }
+
       try {
         final total = manifest.sizeBytes == 0
-            ? (int.tryParse(response.headers.value('content-length') ?? '') ?? 0)
+            ? (int.tryParse(response.headers.value('content-length') ?? '') ??
+                0)
             : manifest.sizeBytes + existing;
         await for (final chunk in response.data!.stream) {
           if (state.paused) {
@@ -171,123 +165,6 @@ class ModelDownloadService {
     }
   }
 
-  Future<String?> _downloadRepository(
-    ModelManifest manifest,
-    _DownloadState state,
-  ) async {
-    final id = manifest.id;
-    final installDirectory = Directory(_installPath(manifest));
-    final stagingDirectory = Directory('${installDirectory.path}.partial');
-    await stagingDirectory.create(recursive: true);
-
-    var downloaded = 0;
-    for (final artifact in manifest.artifacts) {
-      final partial = File(
-        '${stagingDirectory.path}/${artifact.relativePath}.partial',
-      );
-      final completed = File(
-        '${stagingDirectory.path}/${artifact.relativePath}',
-      );
-      if (completed.existsSync() && completed.lengthSync() == artifact.sizeBytes) {
-        downloaded += artifact.sizeBytes;
-      } else if (partial.existsSync()) {
-        downloaded += partial.lengthSync();
-      }
-    }
-    events.add(ModelDownloadStarted(id, manifest.sizeBytes));
-    events.add(ModelDownloadProgress(id, downloaded, manifest.sizeBytes));
-
-    try {
-      for (final artifact in manifest.artifacts) {
-        final target = File('${stagingDirectory.path}/${artifact.relativePath}');
-        final partial = File('${target.path}.partial');
-        await target.parent.create(recursive: true);
-        if (target.existsSync() && target.lengthSync() == artifact.sizeBytes) {
-          continue;
-        }
-
-        var existing = partial.existsSync() ? partial.lengthSync() : 0;
-        final url = artifact.downloadUrl ??
-            '${manifest.downloadUrl}/${artifact.relativePath}';
-        var response = await _dio.get<ResponseBody>(
-          url,
-          options: Options(
-            headers: {if (existing > 0) 'Range': 'bytes=$existing-'},
-            responseType: ResponseType.stream,
-            followRedirects: true,
-            validateStatus: (status) => status == 200 || status == 206,
-          ),
-          cancelToken: state.cancelToken,
-        );
-
-        // Some CDNs ignore Range. Restart this artifact rather than append a
-        // full response to the partial file and corrupt it.
-        if (existing > 0 && response.statusCode == 200) {
-          downloaded -= existing;
-          existing = 0;
-          await partial.writeAsBytes(const <int>[]);
-        }
-        final sink = partial.openWrite(
-          mode: existing == 0 ? FileMode.write : FileMode.append,
-        );
-        try {
-          await for (final chunk in response.data!.stream) {
-            if (state.paused) {
-              events.add(ModelDownloadPaused(id, downloaded));
-              return null;
-            }
-            sink.add(chunk);
-            downloaded += chunk.length;
-            events.add(ModelDownloadProgress(id, downloaded, manifest.sizeBytes));
-          }
-        } finally {
-          await sink.close();
-        }
-
-        if (partial.lengthSync() != artifact.sizeBytes) {
-          throw StateError(
-            '${artifact.relativePath}: expected ${artifact.sizeBytes} bytes, '
-            'got ${partial.lengthSync()}',
-          );
-        }
-        if (artifact.sha256.isNotEmpty) {
-          final actual = await _sha256OfFile(partial.path);
-          if (actual != artifact.sha256) {
-            partial.deleteSync();
-            events.add(ModelErrored(
-              id,
-              ModelErrorKind.checksumMismatch,
-              '${artifact.relativePath}: expected ${artifact.sha256}, got $actual',
-            ));
-            return null;
-          }
-        }
-        partial.renameSync(target.path);
-      }
-
-      events.add(ModelVerifying(id));
-      if (installDirectory.existsSync()) {
-        throw StateError('Install directory already exists: ${installDirectory.path}');
-      }
-      stagingDirectory.renameSync(installDirectory.path);
-      events.add(ModelInstalled(id, installDirectory.path));
-      return installDirectory.path;
-    } on DioException catch (e) {
-      if (state.paused) {
-        events.add(ModelDownloadPaused(id, downloaded));
-        return null;
-      }
-      final kind = e.type == DioExceptionType.cancel
-          ? ModelErrorKind.cancelled
-          : ModelErrorKind.network;
-      events.add(ModelErrored(id, kind, e.message ?? 'network failure'));
-      return null;
-    } catch (e) {
-      events.add(ModelErrored(id, ModelErrorKind.unknown, e.toString()));
-      return null;
-    }
-  }
-
   Future<void> pause(String modelId) async {
     final state = _active[modelId];
     if (state == null) return;
@@ -321,7 +198,8 @@ class ModelDownloadService {
 
   String _partialPath(String modelId) {
     final manifest = manifestFor(modelId);
-    if (manifest == null) return '${rootDirectory.path}/models/$modelId/.partial';
+    if (manifest == null)
+      return '${rootDirectory.path}/models/$modelId/.partial';
     return '${_installPath(manifest)}.partial';
   }
 
@@ -339,7 +217,8 @@ class ModelDownloadService {
 List<ModelManifest> knownModels() => [qwen3Tts06B, qwen3Llm06B];
 
 Future<String> _sha256OfFile(String path) async {
-  final digest = await sha256.bind(File(path).openRead().cast<List<int>>()).first;
+  final digest =
+      await sha256.bind(File(path).openRead().cast<List<int>>()).first;
   return digest.toString();
 }
 

@@ -53,8 +53,6 @@ class AsrService(
         Manifest.permission.RECORD_AUDIO,
     ) == PackageManager.PERMISSION_GRANTED
 
-    fun requestPermission(): Boolean = hasRecordPermission()
-
     fun loadProfile(profileId: String, languageCode: String): Boolean {
         // JNI hook (filled in once `liblanguage_coach_asr` ships):
         //   val ok = nativeLoadProfile(profileId, languageCode,

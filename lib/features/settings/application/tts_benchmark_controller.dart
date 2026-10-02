@@ -3,8 +3,6 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/audio/model_manifest.dart';
-import '../../../core/audio/native_qwen_tts_engine.dart';
-import '../../../core/audio/tts_engine.dart';
 import '../../../core/native/native_ai_bridge.dart';
 import '../../chat/application/conversation_providers.dart';
 
@@ -278,92 +276,4 @@ class TtsBenchmarkController extends Notifier<BenchmarkState> {
   String _manifestJson(ModelManifest m) {
     return 'placeholder manifest (id=${m.id} version=${m.version})';
   }
-}
-
-/// Helper kept on the engine side so the benchmark page can stub a fake
-/// [NativeQwenTtsEngine] for offline widget tests.
-TtsEngine buildStubEngine({String id = 'qwen3-tts'}) => NativeQwenTtsEngine(
-      bridge: _StubBridge(),
-      modelId: id,
-    );
-
-class _StubBridge implements NativeAiBridge {
-  @override
-  Stream<Object?> get eventStream => const Stream.empty();
-  @override
-  Future<String?> synthesize({
-    required String text,
-    required String language,
-    String? voice,
-    double? speed,
-    String? model,
-  }) async =>
-      null;
-  @override
-  Future<String> loadModel(
-          {required String modelId,
-          required String manifestJson,
-          String? localDirectory}) async =>
-      modelId;
-  @override
-  Future<int> warmupModel({required String modelId}) async => 0;
-  @override
-  Future<void> unloadModel({required String modelId}) async {}
-  @override
-  Future<bool> cancelSynthesis() async => false;
-  @override
-  Future<Map<Object?, Object?>?> benchmarkSnapshot() async => <String, Object?>{
-        'isLoaded': true,
-        'currentRssKb': 1234,
-        'peakRssKb': 5678,
-        'threadCount': 12,
-      };
-  @override
-  Future<List<Map<Object?, Object?>>> listAsrProfiles() async => const [];
-  @override
-  Future<bool> loadAsrProfile({
-    required String profileId,
-    required String languageCode,
-  }) async =>
-      false;
-  @override
-  Future<void> startAsrCapture({
-    required String preferredAsrLanguage,
-    String? profileId,
-    int? silenceTimeoutMs,
-  }) async {}
-  @override
-  Future<void> stopAsrCapture() async {}
-  @override
-  Future<void> cancelAsrCapture() async {}
-  @override
-  Future<bool> isSpeechRecognitionAvailable() async => false;
-  @override
-  Future<void> startListening({required String language}) async {}
-  @override
-  Future<void> stopListening() async {}
-  @override
-  Future<void> cancelListening() async {}
-  @override
-  Future<String?> loadLlmModel({
-    required String modelId,
-    String? manifestJson,
-    String? localDirectory,
-  }) async =>
-      null;
-  @override
-  Future<String?> startLlmGeneration({
-    required String sessionId,
-    required String prompt,
-    required String modelId,
-    int? maxTokens,
-    double? temperature,
-  }) async =>
-      null;
-  @override
-  Future<void> cancelLlmGeneration({required String sessionId}) async {}
-  @override
-  Future<void> unloadLlmModel({required String modelId}) async {}
-  @override
-  Future<List<Map<Object?, Object?>>> listLlmModels() async => const [];
 }

@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'model_manifest.dart';
 
@@ -155,32 +154,4 @@ abstract interface class ModelManager {
 
   /// Hot stream of lifecycle events for the UI.
   Stream<ModelEvent> get events;
-}
-
-/// Sentinel used to detect when a download needs disk space before it
-/// starts. Implementations must call this *before* the first byte is
-/// written so the UI can surface the disk-full error path.
-///
-/// Dart's `dart:io` exposes no portable free-space API (no `statvfs`),
-/// and `FileStat.size` on a directory reports the metadata size, not the
-/// remaining bytes on the volume. The previous implementation
-/// unconditionally returned `true` whenever the directory existed, which
-/// hid full-disk failures behind the `ok` UI. The check now delegates to
-/// a `probe` callback supplied at construction — production wires it to
-/// the Kotlin `StatFs.getAvailableBytes()` through a platform channel,
-/// tests can return a fixed bool.
-class DiskSpaceCheck {
-  DiskSpaceCheck({
-    required this.directory,
-    required this.requiredBytes,
-    required this.probe,
-  });
-  final Directory directory;
-  final int requiredBytes;
-  final Future<bool> Function(Directory dir, int requiredBytes) probe;
-
-  /// True if [probe] reports at least [requiredBytes] of free space at
-  /// [directory]. Falls back to `false` on any probe failure so a hard
-  /// disk-full error surfaces through the existing UI path.
-  Future<bool> get isOk => probe(directory, requiredBytes);
 }

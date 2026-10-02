@@ -47,18 +47,6 @@ class SqliteConversationRepository implements ConversationRepository {
     }
   }
 
-  Future<void> touch(String conversationId) async {
-    await _db.update(
-      'conversations',
-      <String, Object?>{
-        'updated_at': DateTime.now().millisecondsSinceEpoch,
-      },
-      where: 'id = ?',
-      whereArgs: [conversationId],
-    );
-  }
-
-  @override
   Future<void> updateTitle(String conversationId, String title) async {
     await _db.update(
       'conversations',
