@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:dio/dio.dart';
 
 /// Classifies network outcomes into a small set the UI layer can render
@@ -97,13 +99,13 @@ class ApiClient {
     try {
       return await send();
     } on DioException catch (e) {
-      throw _mapDioError(e);
+      throw await _mapDioError(e);
     } catch (e) {
       throw LlmError(LlmErrorKind.unknown, 'unexpected: ${e.runtimeType}');
     }
   }
 
-  LlmError _mapDioError(DioException e) {
+  Future<LlmError> _mapDioError(DioException e) async {
     switch (e.type) {
       case DioExceptionType.connectionTimeout:
       case DioExceptionType.sendTimeout:
@@ -115,24 +117,66 @@ class ApiClient {
         return const LlmError(LlmErrorKind.network, 'network unavailable');
       case DioExceptionType.badResponse:
         final status = e.response?.statusCode ?? -1;
+        final detail = await _responseErrorMessage(e.response?.data);
         if (status == 401) {
-          return LlmError(LlmErrorKind.unauthorized, 'invalid api key',
+          return LlmError(LlmErrorKind.unauthorized, detail ?? 'invalid api key',
               httpStatus: 401);
         }
+        if (status == 403) {
+          return LlmError(LlmErrorKind.unauthorized, detail ?? 'access denied',
+              httpStatus: 403);
+        }
         if (status == 429) {
-          return LlmError(LlmErrorKind.rateLimited, 'rate limited',
+          return LlmError(LlmErrorKind.rateLimited, detail ?? 'rate limited',
               httpStatus: 429);
         }
         if (status >= 500) {
-          return LlmError(LlmErrorKind.server, 'upstream error',
+          return LlmError(LlmErrorKind.server, detail ?? 'upstream error',
               httpStatus: status);
         }
-        return LlmError(LlmErrorKind.unknown, 'http $status',
+        if (status >= 400 && status < 500) {
+          return LlmError(LlmErrorKind.format, detail ?? 'request rejected',
+              httpStatus: status);
+        }
+        return LlmError(LlmErrorKind.unknown, detail ?? 'http $status',
             httpStatus: status);
       case DioExceptionType.badCertificate:
       case DioExceptionType.unknown:
       case DioExceptionType.transformTimeout:
         return const LlmError(LlmErrorKind.network, 'network unavailable');
     }
+  }
+
+  Future<String?> _responseErrorMessage(Object? data) async {
+    try {
+      String raw;
+      if (data is ResponseBody) {
+        raw = await utf8.decoder.bind(data.stream).join();
+      } else if (data is String) {
+        raw = data;
+      } else if (data is Map) {
+        return _messageFromJson(data);
+      } else {
+        return null;
+      }
+      if (raw.isEmpty) return null;
+      final decoded = jsonDecode(raw);
+      return decoded is Map ? _messageFromJson(decoded) : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  String? _messageFromJson(Map<dynamic, dynamic> json) {
+    final error = json['error'];
+    if (error is Map && error['message'] is String) {
+      return error['message'] as String;
+    }
+    final baseResponse = json['base_resp'];
+    if (baseResponse is Map && baseResponse['status_msg'] is String) {
+      return baseResponse['status_msg'] as String;
+    }
+    final message = json['message'] ?? json['msg'];
+    return message is String ? message : null;
   }
 }

@@ -17,8 +17,8 @@ class AppConfig {
   /// point at a different host without code edits.
   static const defaultAppConfig = AppConfig(
     miniMax: ProviderEndpoint(
-      baseUrl: 'https://api.MiniMax.chat/v1',
-      model: 'MiniMax-01',
+      baseUrl: 'https://api.minimaxi.com/v1',
+      model: 'MiniMax-M3',
     ),
     deepSeek: ProviderEndpoint(
       baseUrl: 'https://api.deepseek.com/v1',

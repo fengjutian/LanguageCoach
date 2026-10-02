@@ -491,7 +491,7 @@ class _KeyTester {
     if (events.isEmpty) return '测试无响应';
     final last = events.last;
     if (last is LlmEventError) {
-      return switch (last.error.kind) {
+      final summary = switch (last.error.kind) {
         LlmErrorKind.unauthorized => '未授权：Key 无效',
         LlmErrorKind.rateLimited => '通过鉴权，但请求被限流',
         LlmErrorKind.timeout => '连接超时',
@@ -501,6 +501,13 @@ class _KeyTester {
         LlmErrorKind.cancelled => '已取消',
         LlmErrorKind.unknown => '未知错误',
       };
+      final status = last.error.httpStatus;
+      final detail = last.error.message.trim();
+      return [
+        summary,
+        if (status != null) 'HTTP $status',
+        if (detail.isNotEmpty) detail,
+      ].join('：');
     }
     return '连接成功（${provider.id}）';
   }

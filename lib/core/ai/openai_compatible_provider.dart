@@ -96,8 +96,13 @@ JSON object (no prose, no markdown fences) matching this schema:
       return;
     }
 
-    final stream = response.data;
-    if (stream is! Stream<List<int>>) {
+    final responseData = response.data;
+    final Stream<List<int>>? stream = switch (responseData) {
+      ResponseBody body => body.stream,
+      Stream<List<int>> bytes => bytes,
+      _ => null,
+    };
+    if (stream == null) {
       yield LlmEventError(const LlmError(
         LlmErrorKind.format,
         'response body was not a stream',

@@ -71,8 +71,8 @@ class TtsService(private val cacheDirectory: File) {
                 ),
             )
             check(result.success) { result.errorMsg ?: "Native synthesis failed" }
-            val samples = result.audio
-            check(!samples.isNullOrEmpty() && result.sampleRate > 0) {
+            val samples = checkNotNull(result.audio) { "Native synthesis returned no audio" }
+            check(samples.isNotEmpty() && result.sampleRate > 0) {
                 "Native synthesis returned no audio"
             }
             val target = File(cacheDirectory, "synth_${text.hashCode()}_${System.nanoTime()}.wav")
