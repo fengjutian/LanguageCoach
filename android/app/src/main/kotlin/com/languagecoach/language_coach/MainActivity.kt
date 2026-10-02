@@ -20,6 +20,8 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, RecognitionL
     private var speechRecognizer: SpeechRecognizer? = null
     private var pendingPermissionResult: MethodChannel.Result? = null
     private var pendingLanguage: String = "en-US"
+    private var pendingAsrProfileId: String? = null
+    private var pendingLocalCapture = false
     private var ttsService: TtsService? = null
     private var asrService: AsrService? = null
     private var llmService: LlmService? = null
@@ -180,8 +182,7 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, RecognitionL
                     "startAsrCapture" -> {
                         val language = call.argument<String>("preferredAsrLanguage") ?: "auto"
                         val profileId = call.argument<String>("profileId")
-                        val ok = asrService?.startCapture(language, profileId) ?: false
-                        result.success(ok)
+                        requestAudioPermissionAndStartCapture(language, profileId, result)
                     }
                     "stopAsrCapture" -> {
                         asrService?.stopCapture()
@@ -213,6 +214,30 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, RecognitionL
         }
 
         pendingLanguage = language
+        pendingLocalCapture = false
+        pendingPermissionResult = result
+        ActivityCompat.requestPermissions(
+            this,
+            arrayOf(Manifest.permission.RECORD_AUDIO),
+            AUDIO_PERMISSION_REQUEST,
+        )
+    }
+
+    private fun requestAudioPermissionAndStartCapture(
+        language: String,
+        profileId: String?,
+        result: MethodChannel.Result,
+    ) {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            result.success(asrService?.startCapture(language, profileId) ?: false)
+            return
+        }
+
+        pendingLanguage = language
+        pendingAsrProfileId = profileId
+        pendingLocalCapture = true
         pendingPermissionResult = result
         ActivityCompat.requestPermissions(
             this,
@@ -251,11 +276,17 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, RecognitionL
         val result = pendingPermissionResult ?: return
         pendingPermissionResult = null
         if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
-            startListening(pendingLanguage)
-            result.success(null)
+            if (pendingLocalCapture) {
+                result.success(asrService?.startCapture(pendingLanguage, pendingAsrProfileId) ?: false)
+            } else {
+                startListening(pendingLanguage)
+                result.success(null)
+            }
         } else {
             result.error("MICROPHONE_PERMISSION_DENIED", "Microphone permission was denied.", null)
         }
+        pendingLocalCapture = false
+        pendingAsrProfileId = null
     }
 
     override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {

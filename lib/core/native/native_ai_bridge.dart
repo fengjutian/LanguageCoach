@@ -291,25 +291,21 @@ extension NativeAsrEventDecoder on Object? {
 }
 
 AsrErrorKind _mapAsrError(int code) {
-  // Mirrors `SpeechRecognizer.ERROR_*` constants — the sherpa-onnx runtime
-  // uses the same numbering so existing UI strings stay accurate.
+  // Codes 1–9 mirror Android's `SpeechRecognizer.ERROR_*` constants.
+  // The local ASR runtime uses 1001+ so its failures cannot be confused with
+  // Android server/client errors (4/5).
   switch (code) {
     case 1:
       return AsrErrorKind.timeout;
-    case 2:
-      return AsrErrorKind.format;
-    case 4:
-      return AsrErrorKind.permissionDenied;
-    case 5:
-      return AsrErrorKind.permissionDenied;
     case 6:
       return AsrErrorKind.timeout;
-    case 7:
-      return AsrErrorKind.busy;
     case 8:
       return AsrErrorKind.busy;
     case 9:
-      return AsrErrorKind.unavailable;
+    case 1001:
+      return AsrErrorKind.permissionDenied;
+    case 1002:
+      return AsrErrorKind.modelMissing;
     default:
       return AsrErrorKind.unknown;
   }

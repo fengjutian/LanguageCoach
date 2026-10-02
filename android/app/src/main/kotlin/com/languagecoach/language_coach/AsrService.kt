@@ -47,7 +47,7 @@ class AsrService(
     /** Currently active profile, or `null` if none. */
     fun activeProfile(): String? = activeProfileId
 
-    /** Permission gate — Flutter surfaces the error as ASR_ERROR code 4/5. */
+    /** Permission gate — local-runtime error codes live outside Android's range. */
     fun hasRecordPermission(): Boolean = ContextCompat.checkSelfPermission(
         context,
         Manifest.permission.RECORD_AUDIO,
@@ -85,14 +85,14 @@ class AsrService(
         if (!hasRecordPermission()) {
             emit(
                 "ASR_ERROR",
-                mapOf("code" to 4, "message" to "Microphone permission denied"),
+                mapOf("code" to ERROR_PERMISSION_DENIED, "message" to "Microphone permission denied"),
             )
             return false
         }
         if (!loaded.get()) {
             emit(
                 "ASR_ERROR",
-                mapOf("code" to 9, "message" to "No ASR model loaded"),
+                mapOf("code" to ERROR_MODEL_MISSING, "message" to "No ASR model loaded"),
             )
             return false
         }
@@ -221,5 +221,7 @@ class AsrService(
 
     companion object {
         private const val TAG = "AsrService"
+        private const val ERROR_PERMISSION_DENIED = 1001
+        private const val ERROR_MODEL_MISSING = 1002
     }
 }

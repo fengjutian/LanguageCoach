@@ -61,10 +61,28 @@ void main() {
     test('decodes ASR_ERROR with permission code into AsrFailure', () {
       final result = <String, Object?>{
         'type': 'ASR_ERROR',
-        'payload': {'code': 4, 'message': 'denied'},
+        'payload': {'code': 9, 'message': 'denied'},
       }.toAsrResult();
       expect(result, isA<AsrFailure>());
       expect((result as AsrFailure).kind, AsrErrorKind.permissionDenied);
+    });
+
+    test('does not mistake Android server/client failures for permission denial', () {
+      for (final code in [4, 5]) {
+        final result = <String, Object?>{
+          'type': 'ASR_ERROR',
+          'payload': {'code': code, 'message': 'recognizer failed'},
+        }.toAsrResult();
+        expect((result as AsrFailure).kind, AsrErrorKind.unknown);
+      }
+    });
+
+    test('decodes local ASR model missing error', () {
+      final result = <String, Object?>{
+        'type': 'ASR_ERROR',
+        'payload': {'code': 1002, 'message': 'model missing'},
+      }.toAsrResult();
+      expect((result as AsrFailure).kind, AsrErrorKind.modelMissing);
     });
 
     test('returns null for unknown payload shapes', () {
