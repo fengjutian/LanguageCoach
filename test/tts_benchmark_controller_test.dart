@@ -142,6 +142,7 @@ void main() {
   test('model_manifest exposes Qwen3-TTS 0.6B artifact layout', () {
     expect(qwen3Tts06B.id, 'qwen3-tts-0.6B');
     expect(qwen3Tts06B.type, 'tts');
+    expect(qwen3Tts06B.downloadUrl, startsWith('https://hf-mirror.com/'));
     expect(qwen3Tts06B.supportedAbis, ['arm64-v8a']);
     final roles = qwen3Tts06B.artifacts.map((a) => a.role).toSet();
     expect(

@@ -48,6 +48,15 @@ class ModelDownloadService {
     state.cancelToken = CancelToken();
     state.paused = false;
 
+    // Hugging Face checkpoints are repositories, not a single archive.
+    if (manifest.sha256.isEmpty && manifest.artifacts.isNotEmpty) {
+      try {
+        return await _downloadRepository(manifest, state);
+      } finally {
+        _active.remove(id);
+      }
+    }
+
     final installPath = _installPath(manifest);
     final tempPath = '$installPath.partial';
     await Directory(installPath).parent.create(recursive: true);
@@ -165,6 +174,103 @@ class ModelDownloadService {
     }
   }
 
+  Future<String?> _downloadRepository(
+      ModelManifest manifest, _DownloadState state) async {
+    final id = manifest.id;
+    final destination = Directory(_installPath(manifest));
+    final staging = Directory('${destination.path}.partial');
+    await staging.create(recursive: true);
+    var downloaded = 0;
+    for (final artifact in manifest.artifacts) {
+      final file = File('${staging.path}/${artifact.relativePath}');
+      final partial = File('${file.path}.partial');
+      if (file.existsSync() && file.lengthSync() == artifact.sizeBytes) {
+        downloaded += artifact.sizeBytes;
+      } else if (partial.existsSync()) {
+        downloaded += partial.lengthSync();
+      }
+    }
+    events.add(ModelDownloadStarted(id, manifest.sizeBytes));
+    events.add(ModelDownloadProgress(id, downloaded, manifest.sizeBytes));
+    try {
+      for (final artifact in manifest.artifacts) {
+        final target = File('${staging.path}/${artifact.relativePath}');
+        final partial = File('${target.path}.partial');
+        await target.parent.create(recursive: true);
+        if (target.existsSync() && target.lengthSync() == artifact.sizeBytes) {
+          continue;
+        }
+        var existing = partial.existsSync() ? partial.lengthSync() : 0;
+        final response = await _dio.get<ResponseBody>(
+          artifact.downloadUrl ??
+              '${manifest.downloadUrl}/${artifact.relativePath}',
+          options: Options(
+            headers: {if (existing > 0) 'Range': 'bytes=$existing-'},
+            responseType: ResponseType.stream,
+            followRedirects: true,
+            validateStatus: (status) => status == 200 || status == 206,
+          ),
+          cancelToken: state.cancelToken,
+        );
+        if (existing > 0 && response.statusCode == 200) {
+          downloaded -= existing;
+          existing = 0;
+        }
+        final sink = partial.openWrite(
+          mode: existing == 0 ? FileMode.write : FileMode.append,
+        );
+        try {
+          await for (final chunk in response.data!.stream) {
+            sink.add(chunk);
+            downloaded += chunk.length;
+            events
+                .add(ModelDownloadProgress(id, downloaded, manifest.sizeBytes));
+          }
+        } finally {
+          await sink.close();
+        }
+        if (partial.lengthSync() != artifact.sizeBytes) {
+          throw StateError('${artifact.relativePath}: expected '
+              '${artifact.sizeBytes} bytes, got ${partial.lengthSync()}');
+        }
+        if (artifact.sha256.isNotEmpty) {
+          final actual = await _sha256OfFile(partial.path);
+          if (actual != artifact.sha256) {
+            partial.deleteSync();
+            events.add(ModelErrored(
+              id,
+              ModelErrorKind.checksumMismatch,
+              '${artifact.relativePath}: expected ${artifact.sha256}, got $actual',
+            ));
+            return null;
+          }
+        }
+        partial.renameSync(target.path);
+      }
+      events.add(ModelVerifying(id));
+      if (destination.existsSync()) {
+        throw StateError(
+            'Install directory already exists: ${destination.path}');
+      }
+      staging.renameSync(destination.path);
+      events.add(ModelInstalled(id, destination.path));
+      return destination.path;
+    } on DioException catch (e) {
+      if (state.paused) {
+        events.add(ModelDownloadPaused(id, downloaded));
+        return null;
+      }
+      final kind = e.type == DioExceptionType.cancel
+          ? ModelErrorKind.cancelled
+          : ModelErrorKind.network;
+      events.add(ModelErrored(id, kind, e.message ?? 'network failure'));
+      return null;
+    } catch (e) {
+      events.add(ModelErrored(id, ModelErrorKind.unknown, e.toString()));
+      return null;
+    }
+  }
+
   Future<void> pause(String modelId) async {
     final state = _active[modelId];
     if (state == null) return;
@@ -198,8 +304,9 @@ class ModelDownloadService {
 
   String _partialPath(String modelId) {
     final manifest = manifestFor(modelId);
-    if (manifest == null)
+    if (manifest == null) {
       return '${rootDirectory.path}/models/$modelId/.partial';
+    }
     return '${_installPath(manifest)}.partial';
   }
 

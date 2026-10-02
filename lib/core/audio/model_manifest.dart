@@ -129,7 +129,10 @@ const ModelManifest qwen3Tts06B = ModelManifest(
   version: '12hz-0.6b-customvoice-85e237c',
   label: 'Qwen3-TTS 12Hz 0.6B CustomVoice',
   sizeBytes: 2498383610,
-  downloadUrl: 'https://huggingface.co/Qwen/'
+  // Use the mainland-friendly Hugging Face mirror. Keep the repository and
+  // pinned revision identical to the upstream checkpoint so the artifact
+  // checksums below remain valid.
+  downloadUrl: 'https://hf-mirror.com/Qwen/'
       'Qwen3-TTS-12Hz-0.6B-CustomVoice/resolve/'
       '85e237c12c027371202489a0ec509ded67b5e4b5',
   sha256: '',

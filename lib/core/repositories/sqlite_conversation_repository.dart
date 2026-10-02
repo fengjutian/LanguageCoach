@@ -47,6 +47,7 @@ class SqliteConversationRepository implements ConversationRepository {
     }
   }
 
+  @override
   Future<void> updateTitle(String conversationId, String title) async {
     await _db.update(
       'conversations',

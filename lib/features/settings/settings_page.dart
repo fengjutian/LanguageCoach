@@ -203,8 +203,9 @@ class _VoiceSettingsPage extends ConsumerWidget {
           value: _currentVoiceId(settings),
           underline: const SizedBox.shrink(),
           onChanged: (value) {
-            if (value != null)
+            if (value != null) {
               controller.setVoiceForLanguage(settings.preferredLanguage, value);
+            }
           },
           items: _voicesForLanguage(settings.preferredLanguage)
               .map((voice) =>
