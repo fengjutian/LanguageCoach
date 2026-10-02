@@ -11,6 +11,7 @@ import '../../core/security/secure_key_store.dart';
 import '../chat/application/conversation_providers.dart';
 import 'application/api_keys_controller.dart';
 import 'application/settings_controller.dart';
+import 'tts_benchmark_page.dart';
 
 /// Speech-speed choices the audio pipeline will accept downstream. Kept in
 /// sync with [AppSettings.allowedSpeechSpeeds] so the UI cannot suggest a
@@ -129,6 +130,20 @@ class SettingsPage extends ConsumerWidget {
               title: Text('sherpa-onnx ASR'),
               subtitle: Text('尚未下载'),
               trailing: Icon(Icons.download_outlined),
+            ),
+            const Divider(),
+            ListTile(
+              leading: const Icon(Icons.speed),
+              title: const Text('TTS Native Benchmark'),
+              subtitle: const Text('调试：直接驱动 Qwen3-TTS 运行时'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const _TtsBenchmarkEntry(),
+                  ),
+                );
+              },
             ),
             const SizedBox(height: 24),
           ],
@@ -402,4 +417,20 @@ class _SectionTitle extends StatelessWidget {
           ),
         ),
       );
+}
+
+class _TtsBenchmarkEntry extends ConsumerWidget {
+  const _TtsBenchmarkEntry();
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return const _TtsBenchmarkRouter();
+  }
+}
+
+class _TtsBenchmarkRouter extends StatelessWidget {
+  const _TtsBenchmarkRouter();
+  @override
+  Widget build(BuildContext context) {
+    return const TtsBenchmarkPage();
+  }
 }

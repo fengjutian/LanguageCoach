@@ -137,5 +137,22 @@ final List<MigrationStep> migrations = <MigrationStep>[
       installed_at INTEGER
     )
     ''',
+    '''
+    CREATE TABLE audio_files (
+      conversation_id TEXT NOT NULL,
+      message_id TEXT NOT NULL,
+      sentence_id TEXT NOT NULL,
+      audio_path TEXT NOT NULL,
+      bytes INTEGER NOT NULL,
+      format TEXT NOT NULL,
+      duration_ms INTEGER,
+      language TEXT NOT NULL,
+      voice_id TEXT NOT NULL,
+      speed REAL NOT NULL,
+      model_version TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (conversation_id, message_id, sentence_id)
+    )
+    ''',
   ]),
 ];

@@ -6,8 +6,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../core/ai/llm_event.dart';
+import '../../core/audio/asr_engine.dart';
 import '../../core/database/app_database_provider.dart';
 import '../../core/models/chat_models.dart';
+import '../../core/native/native_ai_bridge.dart';
 import '../../core/network/api_client.dart';
 import '../../core/repositories/sqlite_conversation_repository.dart';
 import '../settings/application/settings_controller.dart';
@@ -101,31 +103,43 @@ class _ChatPageState extends ConsumerState<ChatPage> {
   }
 
   void _handleNativeEvent(Object? event) {
-    if (!mounted || event is! Map) return;
-    final type = event['type'];
-    final payload = event['payload'];
-    final data = payload is Map ? payload : const <Object?, Object?>{};
-    switch (type) {
-      case 'ASR_START':
-      case 'ASR_READY':
-      case 'ASR_SPEECH_START':
+    if (!mounted) return;
+    if (event is! Map) return;
+    final result = event.toAsrResult();
+    if (result == null) return;
+    switch (result) {
+      case AsrPartial(:final text):
+        controller.text = text;
+        controller.selection =
+            TextSelection.collapsed(offset: controller.text.length);
         setState(() => isListening = true);
-      case 'ASR_PARTIAL':
-        controller.text = data['text']?.toString() ?? '';
-        controller.selection = TextSelection.collapsed(
-          offset: controller.text.length,
-        );
-      case 'ASR_FINAL':
-        controller.text = data['text']?.toString() ?? '';
-        controller.selection = TextSelection.collapsed(
-          offset: controller.text.length,
-        );
+      case AsrFinal(:final text):
+        controller.text = text;
+        controller.selection =
+            TextSelection.collapsed(offset: controller.text.length);
         setState(() => isListening = false);
-      case 'ASR_CANCELLED':
+      case AsrFailure(:final kind):
         setState(() => isListening = false);
-      case 'ASR_ERROR':
-        setState(() => isListening = false);
-        _showVoiceError(data['message']?.toString() ?? '语音识别失败');
+        _showVoiceError(_describeAsrError(kind));
+    }
+  }
+
+  String _describeAsrError(AsrErrorKind kind) {
+    switch (kind) {
+      case AsrErrorKind.permissionDenied:
+        return '麦克风权限被拒绝';
+      case AsrErrorKind.busy:
+        return '识别器正忙，请稍后再试';
+      case AsrErrorKind.modelMissing:
+        return '语音模型未安装，请前往设置页下载';
+      case AsrErrorKind.timeout:
+        return '识别超时，请重试';
+      case AsrErrorKind.unavailable:
+        return '当前设备没有可用的语音识别服务';
+      case AsrErrorKind.format:
+        return '识别结果解析失败';
+      case AsrErrorKind.unknown:
+        return '语音识别失败';
     }
   }
 
@@ -355,7 +369,10 @@ class _ChatPageState extends ConsumerState<ChatPage> {
                         onRetry: _lastUserInput.isEmpty ? null : retryLast,
                       );
                     }
-                    return MessageBubble(message: message);
+                    return MessageBubble(
+                      message: message,
+                      conversationId: _currentConversationId,
+                    );
                   },
                 ),
         ),

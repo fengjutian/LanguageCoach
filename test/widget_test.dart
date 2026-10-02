@@ -1,9 +1,13 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:language_coach/core/audio/audio_player.dart';
 import 'package:language_coach/core/database/app_database_provider.dart';
 import 'package:language_coach/core/models/app_settings.dart';
 import 'package:language_coach/core/repositories/in_memory_repositories.dart';
+import 'package:language_coach/features/chat/application/tts_controller.dart';
 import 'package:language_coach/features/home/home_page.dart';
 import 'package:language_coach/features/settings/application/settings_controller.dart';
 import 'package:language_coach/features/settings/settings_page.dart';
@@ -56,6 +60,9 @@ void main() {
         overrides: [
           settingsRepositoryProvider.overrideWithValue(settings),
           conversationRepositoryProvider.overrideWithValue(conversations),
+          audioPlayerServiceProvider.overrideWithValue(InMemoryAudioPlayer()),
+          ttsOutputDirectoryProvider.overrideWithValue(
+              Directory.systemTemp.createTempSync('home_test_')),
         ],
         child: const MaterialApp(home: HomePage()),
       ),

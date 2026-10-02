@@ -31,6 +31,9 @@ dependencies:
   # Stable message identifiers
   uuid: ^4.5.1
 
+  # Audio playback (P1-1 wiring — Android ExoPlayer-backed)
+  just_audio: ^0.9.42
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -40,6 +43,9 @@ dev_dependencies:
   build_runner: ^2.4.13
   freezed: ^2.5.7
   json_serializable: ^6.8.0
+
+  # SQLite in host-VM tests (audio cache, schema migration)
+  sqflite_common_ffi: ^2.3.3
 
 flutter:
   uses-material-design: true

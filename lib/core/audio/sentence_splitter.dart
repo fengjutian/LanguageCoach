@@ -1,0 +1,134 @@
+/// Splits a paragraph into playable sentences. Rules cover the languages the
+/// coach already supports; the implementation deliberately errs on the side
+/// of fewer, longer sentences rather than fragmenting output mid-clause.
+class SentenceSplitter {
+  const SentenceSplitter();
+
+  /// Returns sentences in their original order. Empty input returns an empty
+  /// list. Whitespace-only segments are dropped.
+  List<String> split(String input) {
+    final trimmed = input.trim();
+    if (trimmed.isEmpty) return const <String>[];
+
+    final protectedText = _protectAbbreviations(trimmed);
+    final segments = _splitOnBoundaries(protectedText);
+    final result = <String>[];
+    for (final segment in segments) {
+      var normalized = segment.trim();
+      if (normalized.isEmpty) continue;
+
+      normalized = _restoreAbbreviations(normalized);
+
+      final merged = _reattachAbbreviations(result, normalized);
+      if (merged != null) {
+        result[result.length - 1] = '${result.last} $merged'.trim();
+        continue;
+      }
+      if (normalized.length > 200) {
+        result
+            .addAll(_splitLongSentence(normalized).map(_restoreAbbreviations));
+      } else {
+        result.add(normalized);
+      }
+    }
+    return result;
+  }
+
+  /// Swap `e.g.` / `i.e.` style abbreviations for a non-period placeholder
+  /// before we scan for hard boundaries. Restored via [_restoreAbbreviations]
+  /// after the split so downstream callers see the original text.
+  String _protectAbbreviations(String input) {
+    const patterns = <String>['e.g.', 'i.e.', 'etc.'];
+    var result = input;
+    for (final p in patterns) {
+      result = result.replaceAll(p, p.replaceAll('.', '§'));
+    }
+    return result;
+  }
+
+  String _restoreAbbreviations(String input) {
+    return input.replaceAll('§', '.');
+  }
+
+  List<String> _splitOnBoundaries(String input) {
+    final out = <String>[];
+    final buffer = StringBuffer();
+    for (var i = 0; i < input.length; i++) {
+      final ch = input[i];
+      buffer.write(ch);
+      final isBoundary = _isHardBoundary(ch);
+      if (isBoundary && buffer.isNotEmpty) {
+        out.add(buffer.toString());
+        buffer.clear();
+      }
+    }
+    if (buffer.isNotEmpty) out.add(buffer.toString());
+    return out;
+  }
+
+  bool _isHardBoundary(String ch) {
+    // Hard terminators — we intentionally exclude the soft comma `,` /
+    // Chinese `，` / Japanese `、` because they live inside a sentence.
+    return ch == '.' ||
+        ch == '!' ||
+        ch == '?' ||
+        ch == '。' ||
+        ch == '！' ||
+        ch == '？' ||
+        ch == ';' ||
+        ch == '\n';
+  }
+
+  /// Returns true if the just-emitted segment begins with something that
+  /// should join the previous sentence (e.g. `e.g.`), or the previous
+  /// segment ended with a glued abbreviation that swallowed a hard period.
+  String? _reattachAbbreviations(List<String> accumulator, String candidate) {
+    if (accumulator.isEmpty) return null;
+    final candLower = candidate.toLowerCase().trimLeft();
+    final lastLower = accumulator.last.toLowerCase().trimRight();
+    const gluedPrefixes = <String>[
+      'e.g.',
+      'i.e.',
+      'etc.',
+      'mr.',
+      'mrs.',
+      'ms.',
+      'dr.',
+      'st.',
+      'vs.',
+      'no.',
+      'inc.',
+      'ltd.',
+      'co.',
+    ];
+    for (final prefix in gluedPrefixes) {
+      if (candLower.startsWith(prefix)) return candidate;
+    }
+    for (final suffix in gluedPrefixes) {
+      if (lastLower.endsWith(suffix)) return candidate;
+    }
+    return null;
+  }
+
+  List<String> _splitLongSentence(String sentence) {
+    // Last-resort hard cut — soft chunks below 200 chars live above. Split at
+    // the nearest word boundary so the TTS output doesn't break mid-word.
+    const maxLen = 200;
+    if (sentence.length <= maxLen) return [sentence];
+    final parts = <String>[];
+    var remaining = sentence;
+    while (remaining.length > maxLen) {
+      final chunk = remaining.substring(0, maxLen);
+      final lastSpace = chunk.lastIndexOf(' ');
+      if (lastSpace > maxLen ~/ 2) {
+        parts.add(chunk.substring(0, lastSpace).trim());
+        remaining = remaining.substring(lastSpace).trim();
+      } else {
+        parts.add(chunk.trim());
+        remaining = remaining.substring(maxLen).trim();
+      }
+    }
+    if (remaining.isNotEmpty) parts.add(remaining);
+    return parts;
+  }
+}

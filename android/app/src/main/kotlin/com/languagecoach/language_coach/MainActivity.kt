@@ -13,15 +13,29 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
+import java.io.File
 
 class MainActivity : FlutterActivity(), EventChannel.StreamHandler, RecognitionListener {
     private var eventSink: EventChannel.EventSink? = null
     private var speechRecognizer: SpeechRecognizer? = null
     private var pendingPermissionResult: MethodChannel.Result? = null
     private var pendingLanguage: String = "en-US"
+    private var ttsService: TtsService? = null
+    private var asrService: AsrService? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+
+        // The native TTS runtime owns its own scratch directory under the
+        // app's private files dir; Flutter copies the produced WAVs into
+        // `getApplicationDocumentsDirectory()/audio/...` for caching.
+        val ttsCache = File(filesDir, "tts_scratch")
+        if (!ttsCache.exists()) ttsCache.mkdirs()
+        ttsService = TtsService(ttsCache)
+
+        val asrCache = File(filesDir, "asr_scratch")
+        if (!asrCache.exists()) asrCache.mkdirs()
+        asrService = AsrService(this, asrCache, ::emit)
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, COMMANDS_CHANNEL)
             .setMethodCallHandler { call, result ->
@@ -41,11 +55,93 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, RecognitionL
                     }
                     "isSpeechRecognitionAvailable" ->
                         result.success(SpeechRecognizer.isRecognitionAvailable(this))
-                    "generate", "synthesize" -> result.error(
+                    "generate" -> result.error(
                         "MODEL_NOT_CONFIGURED",
-                        "Native model runtime is not configured yet.",
+                        "Native LLM runtime is not configured yet.",
                         null,
                     )
+                    "synthesize" -> {
+                        val text = call.argument<String>("text").orEmpty()
+                        val language = call.argument<String>("language") ?: "en-US"
+                        val voice = call.argument<String>("voice") ?: "default"
+                        val speed = (call.argument<Double>("speed") ?: 1.0)
+                        val model = call.argument<String>("model")
+                        try {
+                            val path = ttsService?.synthesize(
+                                text = text,
+                                language = language,
+                                voice = voice,
+                                speed = speed,
+                                model = model,
+                            )
+                            result.success(path)
+                        } catch (e: Throwable) {
+                            result.error("TTS_FAILED", e.message, null)
+                        }
+                    }
+                    "loadModel" -> {
+                        val modelId = call.argument<String>("modelId") ?: ""
+                        val manifestJson = call.argument<String>("manifestJson")
+                        val localDirectory = call.argument<String>("localDirectory")
+                        try {
+                            val echoed = ttsService?.loadModel(
+                                modelId = modelId,
+                                manifestJson = manifestJson,
+                                localDirectory = localDirectory,
+                            ) ?: modelId
+                            result.success(echoed)
+                        } catch (e: Throwable) {
+                            result.error("TTS_LOAD_FAILED", e.message, null)
+                        }
+                    }
+                    "warmupModel" -> {
+                        val modelId = call.argument<String>("modelId") ?: ""
+                        try {
+                            val elapsed = ttsService?.warmupModel(modelId) ?: 0
+                            result.success(elapsed)
+                        } catch (e: Throwable) {
+                            result.error("TTS_WARMUP_FAILED", e.message, null)
+                        }
+                    }
+                    "unloadModel" -> {
+                        val modelId = call.argument<String>("modelId") ?: ""
+                        ttsService?.unloadModel(modelId)
+                        result.success(null)
+                    }
+                    "cancelSynthesis" -> {
+                        val cancelled = ttsService?.cancelSynthesis() ?: false
+                        result.success(cancelled)
+                    }
+                    "benchmarkSnapshot" -> {
+                        result.success(ttsService?.benchmarkSnapshot())
+                    }
+                    "listAsrProfiles" -> {
+                        result.success(asrService?.listInstalledProfiles())
+                    }
+                    "loadAsrProfile" -> {
+                        val profileId = call.argument<String>("profileId") ?: ""
+                        val languageCode = call.argument<String>("languageCode") ?: "auto"
+                        try {
+                            val ok = asrService?.loadProfile(profileId, languageCode) ?: false
+                            result.success(ok)
+                        } catch (e: Throwable) {
+                            result.error("ASR_LOAD_FAILED", e.message, null)
+                        }
+                    }
+                    "startAsrCapture" -> {
+                        val language = call.argument<String>("preferredAsrLanguage") ?: "auto"
+                        val profileId = call.argument<String>("profileId")
+                        val ok = asrService?.startCapture(language, profileId) ?: false
+                        result.success(ok)
+                    }
+                    "stopAsrCapture" -> {
+                        asrService?.stopCapture()
+                        result.success(null)
+                    }
+                    "cancelAsrCapture" -> {
+                        asrService?.cancelCapture()
+                        result.success(null)
+                    }
                     else -> result.notImplemented()
                 }
             }
@@ -167,6 +263,8 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, RecognitionL
     override fun onDestroy() {
         speechRecognizer?.destroy()
         speechRecognizer = null
+        ttsService?.unloadModel("default")
+        asrService?.cancelCapture()
         super.onDestroy()
     }
 
