@@ -31,10 +31,26 @@ class SettingsPage extends ConsumerWidget {
         const SliverAppBar.large(title: Text('设置')),
         SliverList.list(
           children: const [
-            _SettingsDestination(icon: Icons.tune, title: '常规设置', subtitle: '首选语言与聊天记录', page: _GeneralSettingsPage()),
-            _SettingsDestination(icon: Icons.auto_awesome, title: 'AI 服务', subtitle: '服务提供商与 API Key', page: _AiSettingsPage()),
-            _SettingsDestination(icon: Icons.record_voice_over_outlined, title: '语音设置', subtitle: '自动播放、语速与语音', page: _VoiceSettingsPage()),
-            _SettingsDestination(icon: Icons.memory, title: '模型与工具', subtitle: '本地模型管理与性能测试', page: _ModelSettingsPage()),
+            _SettingsDestination(
+                icon: Icons.tune,
+                title: '常规设置',
+                subtitle: '首选语言与聊天记录',
+                page: _GeneralSettingsPage()),
+            _SettingsDestination(
+                icon: Icons.auto_awesome,
+                title: 'AI 服务',
+                subtitle: '服务提供商与 API Key',
+                page: _AiSettingsPage()),
+            _SettingsDestination(
+                icon: Icons.record_voice_over_outlined,
+                title: '语音设置',
+                subtitle: '自动播放、语速与语音',
+                page: _VoiceSettingsPage()),
+            _SettingsDestination(
+                icon: Icons.memory,
+                title: '模型与工具',
+                subtitle: '本地模型管理与性能测试',
+                page: _ModelSettingsPage()),
             SizedBox(height: 24),
           ],
         ),
@@ -44,7 +60,11 @@ class SettingsPage extends ConsumerWidget {
 }
 
 class _SettingsDestination extends StatelessWidget {
-  const _SettingsDestination({required this.icon, required this.title, required this.subtitle, required this.page});
+  const _SettingsDestination(
+      {required this.icon,
+      required this.title,
+      required this.subtitle,
+      required this.page});
   final IconData icon;
   final String title;
   final String subtitle;
@@ -57,7 +77,8 @@ class _SettingsDestination extends StatelessWidget {
         title: Text(title),
         subtitle: Text(subtitle),
         trailing: const Icon(Icons.chevron_right),
-        onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => page)),
+        onTap: () => Navigator.of(context)
+            .push(MaterialPageRoute<void>(builder: (_) => page)),
       );
 }
 
@@ -92,11 +113,17 @@ class _GeneralSettingsPage extends ConsumerWidget {
           onChanged: (value) {
             if (value != null) controller.setPreferredLanguage(value);
           },
-          items: CoachLanguage.values.map((item) => DropdownMenuItem(value: item, child: Text('${item.flag} ${item.label}'))).toList(),
+          items: CoachLanguage.values
+              .map((item) => DropdownMenuItem(
+                  value: item, child: Text('${item.flag} ${item.label}')))
+              .toList(),
         ),
       ),
       const _SectionTitle('会话'),
-      SwitchListTile(title: const Text('保存聊天记录'), value: settings.saveHistory, onChanged: controller.setSaveHistory),
+      SwitchListTile(
+          title: const Text('保存聊天记录'),
+          value: settings.saveHistory,
+          onChanged: controller.setSaveHistory),
     ]);
   }
 }
@@ -120,12 +147,16 @@ class _AiSettingsPage extends ConsumerWidget {
           onChanged: (value) {
             if (value != null) controller.setProvider(value);
           },
-          items: AiProvider.values.map((provider) => DropdownMenuItem(value: provider, child: Text(switch (provider) {
-            AiProvider.auto => 'Auto',
-            AiProvider.miniMax => 'MiniMax',
-            AiProvider.deepSeek => 'DeepSeek',
-            AiProvider.localQwen => 'Local Qwen3',
-          }))).toList(),
+          items: AiProvider.values
+              .map((provider) => DropdownMenuItem(
+                  value: provider,
+                  child: Text(switch (provider) {
+                    AiProvider.auto => 'Auto',
+                    AiProvider.miniMax => 'MiniMax',
+                    AiProvider.deepSeek => 'DeepSeek',
+                    AiProvider.localQwen => 'Local Qwen3',
+                  })))
+              .toList(),
         ),
       ),
       const _ApiKeysSection(),
@@ -141,10 +172,14 @@ class _VoiceSettingsPage extends ConsumerWidget {
     final settings = ref.watch(settingsControllerProvider);
     final controller = ref.read(settingsControllerProvider.notifier);
     return _SettingsScaffold(title: '语音设置', children: [
-      SwitchListTile(title: const Text('自动播放'), value: settings.autoPlay, onChanged: controller.setAutoPlay),
+      SwitchListTile(
+          title: const Text('自动播放'),
+          value: settings.autoPlay,
+          onChanged: controller.setAutoPlay),
       ListTile(
         title: const Text('语速'),
-        subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        subtitle:
+            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text('${settings.speechSpeed.toStringAsFixed(2)}x'),
           Slider(
             value: settings.speechSpeed,
@@ -153,7 +188,8 @@ class _VoiceSettingsPage extends ConsumerWidget {
             divisions: _kSpeechSpeedStops.length - 1,
             label: '${settings.speechSpeed.toStringAsFixed(2)}x',
             onChanged: (next) {
-              final snapped = _kSpeechSpeedStops.reduce((a, b) => ((next - a).abs() < (next - b).abs()) ? a : b);
+              final snapped = _kSpeechSpeedStops.reduce(
+                  (a, b) => ((next - a).abs() < (next - b).abs()) ? a : b);
               controller.setSpeechSpeed(snapped);
             },
           ),
@@ -167,9 +203,13 @@ class _VoiceSettingsPage extends ConsumerWidget {
           value: _currentVoiceId(settings),
           underline: const SizedBox.shrink(),
           onChanged: (value) {
-            if (value != null) controller.setVoiceForLanguage(settings.preferredLanguage, value);
+            if (value != null)
+              controller.setVoiceForLanguage(settings.preferredLanguage, value);
           },
-          items: _voicesForLanguage(settings.preferredLanguage).map((voice) => DropdownMenuItem(value: voice.id, child: Text(voice.label))).toList(),
+          items: _voicesForLanguage(settings.preferredLanguage)
+              .map((voice) =>
+                  DropdownMenuItem(value: voice.id, child: Text(voice.label)))
+              .toList(),
         ),
       ),
     ]);
@@ -180,7 +220,8 @@ class _ModelSettingsPage extends StatelessWidget {
   const _ModelSettingsPage();
 
   @override
-  Widget build(BuildContext context) => _SettingsScaffold(title: '模型与工具', children: [
+  Widget build(BuildContext context) =>
+      _SettingsScaffold(title: '模型与工具', children: [
         const _SectionTitle('本地模型'),
         const _ModelsSection(),
         const Divider(),
@@ -189,7 +230,8 @@ class _ModelSettingsPage extends StatelessWidget {
           title: const Text('TTS Native Benchmark'),
           subtitle: const Text('调试：直接驱动 Qwen3-TTS 运行时'),
           trailing: const Icon(Icons.chevron_right),
-          onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const _TtsBenchmarkEntry())),
+          onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
+              builder: (_) => const _TtsBenchmarkEntry())),
         ),
       ]);
 }

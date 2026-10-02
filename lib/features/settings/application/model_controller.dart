@@ -67,6 +67,10 @@ class ModelController extends Notifier<ModelListState> {
   ModelListState build() {
     final service = ref.watch(modelDownloadServiceProvider);
     final manager = ref.watch(modelManagerProvider);
+    // Cancel the previous subscription before replacing it — otherwise
+    // every rebuild stacks a new listener and every event fires N times.
+    _eventSub?.cancel();
+    _eventSub = null;
     if (manager != null) {
       _eventSub = manager.events.listen(_onEvent);
     } else if (service != null) {

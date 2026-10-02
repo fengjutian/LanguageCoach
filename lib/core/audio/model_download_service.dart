@@ -79,27 +79,38 @@ class ModelDownloadService {
       );
 
       final raf = File(tempPath).openWrite(mode: existing == 0 ? FileMode.write : FileMode.append);
+      // `IOSink.close()` is idempotent at the OS level but the Dart wrapper
+      // throws on the second call (`FileSystemException: File already
+      // closed`). Guard with a flag — earlier code closed three times in the
+      // success path plus a fourth in `finally`, blowing up the second
+      // close. The flag lets every exit path converge on one close.
+      var rafClosed = false;
+      Future<void> closeRaf() async {
+        if (rafClosed) return;
+        rafClosed = true;
+        await raf.close();
+      }
       try {
         final total = manifest.sizeBytes == 0
             ? (int.tryParse(response.headers.value('content-length') ?? '') ?? 0)
             : manifest.sizeBytes + existing;
         await for (final chunk in response.data!.stream) {
           if (state.paused) {
-            await raf.close();
+            await closeRaf();
             events.add(ModelDownloadPaused(id, downloaded));
             return null;
           }
           if (state.cancelToken?.isCancelled ?? false) {
-            await raf.close();
+            await closeRaf();
             throw _Cancelled();
           }
           raf.add(chunk);
           downloaded += chunk.length;
           events.add(ModelDownloadProgress(id, downloaded, total));
         }
-        await raf.close();
+        await closeRaf();
       } finally {
-        await raf.close();
+        await closeRaf();
       }
 
       events.add(ModelVerifying(id));

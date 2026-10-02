@@ -160,24 +160,27 @@ abstract interface class ModelManager {
 /// Sentinel used to detect when a download needs disk space before it
 /// starts. Implementations must call this *before* the first byte is
 /// written so the UI can surface the disk-full error path.
+///
+/// Dart's `dart:io` exposes no portable free-space API (no `statvfs`),
+/// and `FileStat.size` on a directory reports the metadata size, not the
+/// remaining bytes on the volume. The previous implementation
+/// unconditionally returned `true` whenever the directory existed, which
+/// hid full-disk failures behind the `ok` UI. The check now delegates to
+/// a `probe` callback supplied at construction — production wires it to
+/// the Kotlin `StatFs.getAvailableBytes()` through a platform channel,
+/// tests can return a fixed bool.
 class DiskSpaceCheck {
-  DiskSpaceCheck({required this.directory, required this.requiredBytes});
+  DiskSpaceCheck({
+    required this.directory,
+    required this.requiredBytes,
+    required this.probe,
+  });
   final Directory directory;
   final int requiredBytes;
+  final Future<bool> Function(Directory dir, int requiredBytes) probe;
 
-  /// True if the directory has at least [requiredBytes] available.
-  /// Implementations may use `FileSystemEntity.statSync().size` against
-  /// the parent volume; the host VM test uses a fake.
-  bool get isOk {
-    try {
-      final stat = FileStat.statSync(directory.path);
-      // FileStat.size is misleading on directories — we cannot read free
-      // space directly in pure Dart. The contract is documented to mean
-      // "the platform layer verified there is room"; the Dart side
-      // delegates that to a native probe (P1-5 keeps it best-effort).
-      return stat.size >= 0;
-    } catch (_) {
-      return false;
-    }
-  }
+  /// True if [probe] reports at least [requiredBytes] of free space at
+  /// [directory]. Falls back to `false` on any probe failure so a hard
+  /// disk-full error surfaces through the existing UI path.
+  Future<bool> get isOk => probe(directory, requiredBytes);
 }

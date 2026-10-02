@@ -63,5 +63,5 @@ final conversationEngineProvider = Provider<ConversationEngine>((ref) {
 /// Native bridge surface for the Kotlin side. Tests override this provider
 /// with a [FakeNativeAiBridge] implementation.
 final nativeAiBridgeProvider = Provider<NativeAiBridge>((ref) {
-  return const DefaultBridge();
+  return DefaultBridge();
 });

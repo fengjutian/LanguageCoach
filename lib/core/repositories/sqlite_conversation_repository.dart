@@ -97,21 +97,25 @@ class SqliteConversationRepository implements ConversationRepository {
       whereArgs: [conversationId],
       orderBy: 'created_at ASC',
     );
-    final sentenceRows = await _db.rawQuery(
-      'SELECT message_id, sentence_index, id, text FROM sentences '
-      'WHERE message_id IN (${rows.map((_) => '?').join(',')}) '
-      'ORDER BY message_id, sentence_index ASC',
-      rows.map((r) => r['id'] as String).toList(),
-    );
+    // Skip the sentence query when there are no messages, otherwise we
+    // build `WHERE message_id IN ()` which SQLite rejects.
     final sentencesByMessage = <String, List<CoachSentence>>{};
-    for (final row in sentenceRows) {
-      final messageId = row['message_id'] as String;
-      final list =
-          sentencesByMessage.putIfAbsent(messageId, () => <CoachSentence>[]);
-      list.add(CoachSentence(
-        id: row['id'] as String,
-        text: row['text'] as String,
-      ));
+    if (rows.isNotEmpty) {
+      final sentenceRows = await _db.rawQuery(
+        'SELECT message_id, sentence_index, id, text FROM sentences '
+        'WHERE message_id IN (${rows.map((_) => '?').join(',')}) '
+        'ORDER BY message_id, sentence_index ASC',
+        rows.map((r) => r['id'] as String).toList(),
+      );
+      for (final row in sentenceRows) {
+        final messageId = row['message_id'] as String;
+        final list =
+            sentencesByMessage.putIfAbsent(messageId, () => <CoachSentence>[]);
+        list.add(CoachSentence(
+          id: row['id'] as String,
+          text: row['text'] as String,
+        ));
+      }
     }
 
     return rows.map((row) {
@@ -206,12 +210,16 @@ class SqliteConversationRepository implements ConversationRepository {
   @override
   Future<List<({String id, String preview, DateTime updatedAt})>>
       recentConversations({int limit = 50, String? query}) async {
-    final where = query == null || query.isEmpty
+    final trimmedQuery = query?.trim();
+    final where = trimmedQuery == null || trimmedQuery.isEmpty
         ? null
         : '(title LIKE ? OR EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = conversations.id AND m.source_text LIKE ?))';
-    final args = query == null || query.isEmpty
+    // Escape SQL LIKE wildcards so user input doesn't get interpreted as
+    // a pattern: `%` (any), `_` (single char), and `\` (escape itself).
+    final escaped = _escapeLike(trimmedQuery ?? '');
+    final args = trimmedQuery == null || trimmedQuery.isEmpty
         ? null
-        : <Object?>['%$query%', '%$query%'];
+        : <Object?>['%$escaped%', '%$escaped%'];
     final rows = await _db.query(
       'conversations',
       where: where,
@@ -259,5 +267,14 @@ class SqliteConversationRepository implements ConversationRepository {
     final hh = now.hour.toString().padLeft(2, '0');
     final mm = now.minute.toString().padLeft(2, '0');
     return '对话 $m-$d $hh:$mm';
+  }
+
+  /// Escape SQL LIKE wildcards so user-typed search terms don't get
+  /// interpreted as patterns. The default escape character is `\`.
+  static String _escapeLike(String input) {
+    return input
+        .replaceAll('\\', '\\\\')
+        .replaceAll('%', '\\%')
+        .replaceAll('_', '\\_');
   }
 }

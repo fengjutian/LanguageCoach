@@ -58,7 +58,11 @@ void main() {
       tester.view.resetDevicePixelRatio();
     });
     await tester.pumpWidget(_wrap(const SettingsPage()));
-    expect(find.text('设置'), findsOneWidget);
+    // SliverAppBar.large keeps both the collapsed and expanded title widgets
+    // in the tree simultaneously, so an exact '设置' Text appears twice
+    // (the bar's auto-sized variants). Use `findsWidgets` for the page
+    // title to match the framework reality.
+    expect(find.text('设置'), findsWidgets);
     expect(find.text('常规设置'), findsOneWidget);
     expect(find.text('AI 服务'), findsOneWidget);
     expect(find.text('语音设置'), findsOneWidget);

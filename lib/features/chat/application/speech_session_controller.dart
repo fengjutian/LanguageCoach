@@ -119,11 +119,14 @@ final speechSessionControllerProvider =
 );
 
 class SpeechSessionController extends Notifier<SpeechSessionState> {
-  AsrEngineChoice _engine = AsrEngineChoice.auto;
+  // Read the current engine choice on demand from the mutation methods —
+  // using `ref.watch` here would tie the choice to the notifier's
+  // dependency graph and re-emit a rebuild every time the user toggled
+  // the engine in settings, which `Notifier`'s API doesn't support.
+  AsrEngineChoice _readEngine() => ref.read(asrEngineChoiceProvider);
 
   @override
   SpeechSessionState build() {
-    _engine = ref.read(asrEngineChoiceProvider);
     // Riverpod owns the subscription; this fires for every event the
     // ASR stream provider emits, including re-emits after invalidation.
     ref.listen<AsyncValue<AsrResult>>(asrResultStreamProvider, (_, next) {
@@ -143,7 +146,7 @@ class SpeechSessionController extends Notifier<SpeechSessionState> {
       partialText: '',
       clearError: true,
     );
-    if (_engine == AsrEngineChoice.system || _engine == AsrEngineChoice.auto) {
+    if (_readEngine() == AsrEngineChoice.system || _readEngine() == AsrEngineChoice.auto) {
       await bridge.startListening(language: language);
     } else {
       await bridge.startAsrCapture(preferredAsrLanguage: language);
@@ -152,7 +155,7 @@ class SpeechSessionController extends Notifier<SpeechSessionState> {
 
   Future<void> stop() async {
     final bridge = ref.read(nativeAiBridgeProvider);
-    if (_engine == AsrEngineChoice.system || _engine == AsrEngineChoice.auto) {
+    if (_readEngine() == AsrEngineChoice.system || _readEngine() == AsrEngineChoice.auto) {
       await bridge.stopListening();
     } else {
       await bridge.stopAsrCapture();
@@ -162,7 +165,7 @@ class SpeechSessionController extends Notifier<SpeechSessionState> {
 
   Future<void> cancel() async {
     final bridge = ref.read(nativeAiBridgeProvider);
-    if (_engine == AsrEngineChoice.system || _engine == AsrEngineChoice.auto) {
+    if (_readEngine() == AsrEngineChoice.system || _readEngine() == AsrEngineChoice.auto) {
       await bridge.cancelListening();
     } else {
       await bridge.cancelAsrCapture();
@@ -176,12 +179,12 @@ class SpeechSessionController extends Notifier<SpeechSessionState> {
   Future<bool> ensureEngineReady() async {
     final bridge = ref.read(nativeAiBridgeProvider);
     final language = ref.read(resolvedAsrLanguageProvider);
-    if (_engine == AsrEngineChoice.system) {
+    if (_readEngine() == AsrEngineChoice.system) {
       final ok = await bridge.isSpeechRecognitionAvailable();
       state = state.copyWith(engineReady: ok);
       return ok;
     }
-    if (_engine == AsrEngineChoice.sherpaOnnx) {
+    if (_readEngine() == AsrEngineChoice.sherpaOnnx) {
       try {
         final raw = await bridge.listAsrProfiles();
         final installed = decodeAsrProfiles(raw);
@@ -205,14 +208,16 @@ class SpeechSessionController extends Notifier<SpeechSessionState> {
         return false;
       }
     }
-    // auto: try sherpa first, then fall back to system.
+    // auto: try sherpa first, then fall back to system. Persist the
+    // resolution back into the provider so subsequent reads (and a UI
+    // indicator) reflect what actually got selected.
     final sherpaOk = await _trySherpa(language, bridge);
     if (sherpaOk) {
-      _engine = AsrEngineChoice.sherpaOnnx;
+      ref.read(asrEngineChoiceProvider.notifier).set(AsrEngineChoice.sherpaOnnx);
       return true;
     }
     final systemOk = await bridge.isSpeechRecognitionAvailable();
-    _engine = AsrEngineChoice.system;
+    ref.read(asrEngineChoiceProvider.notifier).set(AsrEngineChoice.system);
     state = state.copyWith(engineReady: systemOk);
     return systemOk;
   }

@@ -107,7 +107,7 @@ abstract interface class NativeAiBridge {
 /// side in `MainActivity.kt`. Replace in tests with any other
 /// [NativeAiBridge] implementation.
 class DefaultBridge implements NativeAiBridge {
-  const DefaultBridge();
+  DefaultBridge();
 
   static const MethodChannel _commands =
       MethodChannel('language_coach/ai_commands');
