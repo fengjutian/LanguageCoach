@@ -27,12 +27,11 @@ class SystemShareService implements ShareService {
     String? text,
     String? subject,
   }) async {
-    final params = ShareParams(
-      files: [XFile(path)],
-      text: text,
+    await Share.shareXFiles(
+      [XFile(path)],
       subject: subject,
+      text: text,
     );
-    await SharePlus.instance.share(params);
   }
 }
 

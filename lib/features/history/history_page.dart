@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../settings/application/settings_controller.dart';
+import 'application/conversation_export_providers.dart';
 import 'application/history_controller.dart';
 
 class HistoryPage extends ConsumerStatefulWidget {
@@ -54,6 +55,24 @@ class _HistoryPageState extends ConsumerState<HistoryPage> {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('已恢复该对话。请回到对话页查看。')),
     );
+  }
+
+  Future<void> _exportConversation(String conversationId) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final path = await ref.read(
+        exportConversationProvider(conversationId).future,
+      );
+      if (!mounted) return;
+      messenger.showSnackBar(
+        SnackBar(content: Text('已导出到 $path')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      messenger.showSnackBar(
+        SnackBar(content: Text('导出失败：$e')),
+      );
+    }
   }
 
   @override
@@ -154,6 +173,7 @@ class _HistoryPageState extends ConsumerState<HistoryPage> {
                       style: const TextStyle(color: Colors.black54),
                     ),
                     onTap: () => _openConversation(item.id),
+                    onLongPress: () => _showItemMenu(item.id),
                   ),
                 );
               },
@@ -177,4 +197,38 @@ class _HistoryPageState extends ConsumerState<HistoryPage> {
     String two(int v) => v.toString().padLeft(2, '0');
     return '${two(l.month)}-${two(l.day)} ${two(l.hour)}:${two(l.minute)}';
   }
+
+  Future<void> _showItemMenu(String conversationId) async {
+    final action = await showModalBottomSheet<_HistoryItemAction>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.ios_share),
+              title: const Text('导出 / 分享'),
+              onTap: () => Navigator.pop(ctx, _HistoryItemAction.export),
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete_outline),
+              title: const Text('删除'),
+              onTap: () => Navigator.pop(ctx, _HistoryItemAction.delete),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted || action == null) return;
+    switch (action) {
+      case _HistoryItemAction.export:
+        await _exportConversation(conversationId);
+      case _HistoryItemAction.delete:
+        await ref
+            .read(historyControllerProvider.notifier)
+            .deleteConversation(conversationId);
+    }
+  }
 }
+
+enum _HistoryItemAction { export, delete }

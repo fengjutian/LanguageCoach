@@ -76,8 +76,6 @@ class ConversationExporter {
         return '你';
       case MessageRole.assistant:
         return '教练';
-      case MessageRole.system:
-        return '系统';
       case MessageRole.error:
         return '错误';
     }
@@ -102,24 +100,12 @@ class ConversationExporter {
   }
 
   String _slug(String input) {
-    final lowered = input.toLowerCase();
-    final cleaned = StringBuffer();
-    for (final rune in lowered.runes) {
-      final ch = String.fromCharCode(rune);
-      final isAlnum = RegExp(r'[a-z0-9]').hasMatch(ch);
-      final isDash = ch == '-' || ch == '_';
-      if (isAlnum) {
-        cleaned.write(ch);
-      } else if (isDash) {
-        cleaned.write('-');
-      } else if (cleaned.isNotEmpty && cleaned.toString().endsWith('-') == false) {
-        cleaned.write('-');
-      }
-    }
-    var slug = cleaned.toString();
-    while (slug.endsWith('-')) {
-      slug = slug.substring(0, slug.length - 1);
-    }
-    return slug;
+    // Keep ASCII alphanumerics + underscores + CJK characters; collapse
+    // everything else (whitespace, punctuation, slashes) into a single
+    // dash so the result is filename-safe on every platform.
+    return input
+        .replaceAll(RegExp(r'[^a-zA-Z0-9_\u4e00-\u9fff-]+'), '-')
+        .replaceAll(RegExp(r'-+'), '-')
+        .replaceAll(RegExp(r'^-+|-+$'), '');
   }
 }

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:uuid/uuid.dart';
 
+import '../audio/sentence_splitter.dart';
 import '../models/chat_models.dart';
 import '../native/native_ai_bridge.dart';
 import '../network/api_client.dart';
@@ -11,22 +12,32 @@ import 'llm_provider.dart';
 /// Drives the on-device Qwen3 model through [NativeAiBridge]. Streaming
 /// tokens come back as `LLM_TOKEN` events on the bridge's `eventStream`;
 /// the provider concatenates them and wraps the final assembled text as a
-/// [CoachResponse] at completion. P1-6 deliberately does not try to coerce
-/// the raw model output into structured fields — that lands with the
-/// post-P1-6 quality work. Until then, the chat UI renders the streamed
-/// text verbatim and the rest of the [CoachResponse] slots stay empty.
+/// [CoachResponse] at completion.
+///
+/// P2-3 assembles a real [CoachResponse] instead of dumping raw text into
+/// `primary`: the assembled text is split with [SentenceSplitter] so the
+/// chat UI can render per-sentence play buttons, and a lightweight
+/// frequency-based keyword extractor surfaces up to
+/// [maxKeywords] vocabulary candidates for the vocabulary highlight
+/// surface (P3+).
 class LocalQwenProvider implements LlmProvider {
   LocalQwenProvider({
     required NativeAiBridge bridge,
     required String modelId,
     Uuid? uuid,
+    SentenceSplitter? splitter,
+    int maxKeywords = 4,
   })  : _bridge = bridge,
         _modelId = modelId,
-        _uuid = uuid ?? const Uuid();
+        _uuid = uuid ?? const Uuid(),
+        _splitter = splitter ?? const SentenceSplitter(),
+        _maxKeywords = maxKeywords;
 
   final NativeAiBridge _bridge;
   final String _modelId;
   final Uuid _uuid;
+  final SentenceSplitter _splitter;
+  final int _maxKeywords;
 
   @override
   String get id => 'Qwen3 (Local)';
@@ -158,6 +169,13 @@ class LocalQwenProvider implements LlmProvider {
 
   LlmEventComplete _buildComplete(String text, CoachRequest request) {
     final trimmed = text.trim();
+    final rawSentences = _splitter.split(trimmed);
+    final sentences = <CoachSentence>[];
+    for (var i = 0; i < rawSentences.length; i++) {
+      sentences.add(CoachSentence(id: 's${i + 1}', text: rawSentences[i]));
+    }
+    final keywords = _extractKeywords(trimmed, max: _maxKeywords);
+
     final response = CoachResponse(
       intent: request.intent,
       sourceLanguage: 'auto',
@@ -165,10 +183,8 @@ class LocalQwenProvider implements LlmProvider {
       primary: trimmed,
       alternatives: const <String>[],
       explanation: '由本地 Qwen3 模型生成。',
-      sentences: trimmed.isEmpty
-          ? const <CoachSentence>[]
-          : [CoachSentence(id: 's1', text: trimmed)],
-      keywords: const <String>[],
+      sentences: sentences,
+      keywords: keywords,
     );
     return LlmEventComplete(
       response,
@@ -180,5 +196,86 @@ class LocalQwenProvider implements LlmProvider {
         model: id,
       ),
     );
+  }
+
+  /// Cheap frequency-based keyword extractor. P2-3 doesn't try to be
+  /// clever — it's just enough for the chat UI to render a "vocab"
+  /// pill row. Languages with non-space word boundaries (Chinese,
+  /// Japanese) end up with character-level granularity; that's fine
+  /// for P2-3 and gets swapped for a proper tokenizer in P3+.
+  List<String> _extractKeywords(String text, {required int max}) {
+    if (text.isEmpty) return const <String>[];
+    final stopwords = _stopwordsFor(_langHint(text));
+    final tokens = _tokenize(text, stopwords);
+    if (tokens.isEmpty) return const <String>[];
+
+    final counts = <String, int>{};
+    for (final token in tokens) {
+      counts[token] = (counts[token] ?? 0) + 1;
+    }
+    final ranked = counts.entries.toList()
+      ..sort((a, b) {
+        final byCount = b.value.compareTo(a.value);
+        if (byCount != 0) return byCount;
+        return a.key.compareTo(b.key);
+      });
+    return ranked
+        .take(max)
+        .map((e) => e.key)
+        .toList(growable: false);
+  }
+
+  String _langHint(String text) {
+    // Heuristic: if the text contains CJK characters, treat it as
+    // CJK for stopword selection. Otherwise default to latin.
+    for (final rune in text.runes) {
+      if (rune >= 0x4e00 && rune <= 0x9fff) return 'cjk';
+    }
+    return 'latin';
+  }
+
+  List<String> _tokenize(String text, Set<String> stopwords) {
+    final tokens = <String>[];
+    final buffer = StringBuffer();
+    void flush() {
+      final token = buffer.toString().toLowerCase();
+      buffer.clear();
+      if (token.isEmpty) return;
+      if (stopwords.contains(token)) return;
+      if (token.length < 2) return;
+      tokens.add(token);
+    }
+
+    for (final rune in text.runes) {
+      final ch = String.fromCharCode(rune);
+      final isWord = RegExp(r'\w').hasMatch(ch);
+      if (isWord) {
+        buffer.write(ch);
+      } else {
+        flush();
+      }
+    }
+    flush();
+    return tokens;
+  }
+
+  Set<String> _stopwordsFor(String lang) {
+    if (lang == 'cjk') {
+      // CJK is character-based; we use a small list of common particles
+      // + generic connectives as stopwords. The tokeniser treats every
+      // CJK character as a token, so this matters more than for latin.
+      return const <String>{
+        '的', '了', '是', '在', '我', '你', '他', '她', '它',
+        '和', '与', '或', '也', '都', '就', '还', '要', '把',
+        '不', '没', '有', '对', '这', '那', '一个', '一些',
+      };
+    }
+    return const <String>{
+      'the', 'a', 'an', 'and', 'or', 'but', 'if', 'then',
+      'is', 'are', 'was', 'were', 'be', 'been', 'being',
+      'i', 'you', 'he', 'she', 'it', 'we', 'they',
+      'to', 'of', 'in', 'on', 'at', 'for', 'with', 'by',
+      'this', 'that', 'these', 'those',
+    };
   }
 }

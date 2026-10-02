@@ -272,6 +272,49 @@ void main() {
 
       expect(bridge.methodCalls, contains('cancelLlmGeneration:$sessionId'));
     });
+
+    test('multi-sentence text gets split + keyword extractor surfaces '
+        'recurring vocabulary', () async {
+      final bridge = _ScriptedBridge();
+      final provider = LocalQwenProvider(
+        bridge: bridge,
+        modelId: qwen3Llm06B.id,
+      );
+
+      final stream = provider.generateStream(
+        const CoachRequest(
+          text: 'teach me about coffee shops in Paris',
+          targetLanguage: CoachLanguage.english,
+          intent: CoachIntent.conversation,
+        ),
+        const <ChatMessage>[],
+      );
+      final received = <LlmEvent>[];
+      final sub = stream.listen(received.add);
+      addTearDown(() => _ignoreFuture(sub.cancel()));
+
+      await pumpMicrotasks();
+      final sessionId =
+          bridge.methodCalls.last.split(':')[1].split(':')[0];
+
+      bridge.emitLlmToken(sessionId, 'Coffee shops ', 0);
+      bridge.emitLlmToken(sessionId, 'in Paris ', 1);
+      bridge.emitLlmToken(sessionId, 'are wonderful. ', 2);
+      bridge.emitLlmToken(sessionId, 'You can order ', 3);
+      bridge.emitLlmToken(sessionId, 'a coffee ', 4);
+      bridge.emitLlmToken(sessionId, 'and enjoy the view.', 5);
+      bridge.emitLlmComplete(sessionId);
+      await pumpMicrotasks();
+
+      final complete = received.whereType<LlmEventComplete>().single;
+      // SentenceSplitter splits on `. ` so we expect two sentences.
+      expect(complete.response.sentences, hasLength(2));
+      expect(complete.response.sentences[0].id, 's1');
+      expect(complete.response.sentences[0].text, contains('wonderful'));
+      expect(complete.response.sentences[1].id, 's2');
+      // 'coffee' appears twice and isn't a stopword — must surface.
+      expect(complete.response.keywords, contains('coffee'));
+    });
   });
 }
 

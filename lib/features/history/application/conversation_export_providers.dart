@@ -1,8 +1,6 @@
-import 'dart:io';
-
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/ai/conversation_repository.dart';
+import '../../../core/database/app_database_provider.dart';
 import 'conversation_export_service.dart';
 import 'conversation_exporter.dart';
 
@@ -12,19 +10,15 @@ final shareServiceProvider = Provider<ShareService>((_) {
   return const SystemShareService();
 });
 
-/// Default export service used in production.
+/// Default export service used in production. The constructor's default
+/// `tempDirectoryProvider` reads via `path_provider`, which is enough for
+/// production builds; tests inject a stub directory instead.
 final conversationExportServiceProvider =
     Provider<ConversationExportService>((ref) {
   return ConversationExportService(
     repository: ref.read(conversationRepositoryProvider),
     exporter: const ConversationExporter(),
     share: ref.read(shareServiceProvider),
-    tempDirectoryProvider: () async => Directory(
-          // Fallback when path_provider isn't available (host VM tests
-          // without WidgetsBinding). Production overrides this with the
-          // real platform temp dir via path_provider.
-          Directory.systemTemp,
-        ),
   );
 });
 
