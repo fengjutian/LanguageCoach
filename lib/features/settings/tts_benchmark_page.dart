@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/ui/app_toast.dart';
 import 'application/benchmark_export_providers.dart';
 import 'application/benchmark_exporter.dart';
 import 'application/tts_benchmark_controller.dart';
@@ -108,7 +109,6 @@ class _TtsBenchmarkPageState extends ConsumerState<TtsBenchmarkPage> {
   }
 
   Future<void> _showExportMenu(BuildContext context) async {
-    final messenger = ScaffoldMessenger.of(context);
     final picked = await showModalBottomSheet<BenchmarkFormat>(
       context: context,
       builder: (ctx) => SafeArea(
@@ -132,13 +132,11 @@ class _TtsBenchmarkPageState extends ConsumerState<TtsBenchmarkPage> {
     if (!mounted || picked == null) return;
     try {
       final path = await ref.read(exportBenchmarkProvider(picked).future);
-      messenger.showSnackBar(
-        SnackBar(content: Text('已导出到 $path')),
-      );
+      if (!context.mounted) return;
+      AppToast.success(context, '已导出到 $path');
     } catch (e) {
-      messenger.showSnackBar(
-        SnackBar(content: Text('导出失败：$e')),
-      );
+      if (!context.mounted) return;
+      AppToast.error(context, '导出失败：$e');
     }
   }
 }

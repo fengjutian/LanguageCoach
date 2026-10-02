@@ -84,21 +84,18 @@ const _kAsrProfiles = <AsrModelProfile>[
 List<AsrModelProfile> knownAsrProfiles() => List.unmodifiable(_kAsrProfiles);
 
 /// Pick the best installed profile for [languageCode] out of [installed].
-/// Falls back to the highest-accuracy profile of any language if no exact
-/// match is available.
+/// Returns `null` when no profile matches the requested language, so the
+/// caller can prompt the user to download the right one. Cross-language
+/// fallback is deliberately rejected: feeding a Mandarin model a
+/// Japanese speaker produced garbage text, which is worse than a visible
+/// "model not installed" error.
 AsrModelProfile? bestFit(
   String languageCode,
   Iterable<AsrModelProfile> installed,
 ) {
   if (installed.isEmpty) return null;
   final exact = installed.where((p) => p.languageCode == languageCode).toList();
-  if (exact.isNotEmpty) {
-    exact.sort((a, b) => b.accuracyTier.index.compareTo(a.accuracyTier.index));
-    return exact.first;
-  }
-  // No exact match — fall back to the highest-accuracy installed profile
-  // regardless of language so the user at least gets *some* recognition.
-  final sorted = installed.toList()
-    ..sort((a, b) => b.accuracyTier.index.compareTo(a.accuracyTier.index));
-  return sorted.first;
+  if (exact.isEmpty) return null;
+  exact.sort((a, b) => b.accuracyTier.index.compareTo(a.accuracyTier.index));
+  return exact.first;
 }

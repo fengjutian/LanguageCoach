@@ -65,7 +65,7 @@ class ModelDownloadService {
 
     // Range download — if the partial file already exists we resume
     // from its byte length.
-    final existing =
+    var existing =
         File(tempPath).existsSync() ? File(tempPath).lengthSync() : 0;
     var downloaded = existing;
 
@@ -78,13 +78,31 @@ class ModelDownloadService {
         options: Options(
           headers: headers,
           responseType: ResponseType.stream,
-          // Re-issue once on a 416 (range unsatisfiable) by restarting
-          // from 0 — happens when the server returns 200 OK for an
-          // already-complete range request.
-          validateStatus: (s) => s != null && s < 500,
+          // Only 200 (server ignored Range and returned the full
+          // artifact) and 206 (Range honored) are valid download
+          // responses. Anything else — most importantly 416 (range
+          // unsatisfiable, raised when the partial file is already at
+          // the canonical artifact size) — must surface as an error.
+          // Allowing 4xx through meant the server's error body was
+          // streamed into the partial file and then renamed to the
+          // install path on the PLACEHOLDER SHA-256 short-circuit,
+          // silently promoting a corrupted artifact.
+          validateStatus: (s) => s == 200 || s == 206,
         ),
         cancelToken: state.cancelToken,
       );
+
+      // Some servers ignore the Range header and return 200 OK carrying
+      // the full body. Appending to the partial file in that case would
+      // corrupt the artifact — drop the partial bytes so the openWrite
+      // below opens in write mode instead of append mode.
+      if (response.statusCode == 200 && existing > 0) {
+        try {
+          File(tempPath).deleteSync();
+        } catch (_) {}
+        existing = 0;
+        downloaded = 0;
+      }
 
       final raf = File(tempPath)
           .openWrite(mode: existing == 0 ? FileMode.write : FileMode.append);

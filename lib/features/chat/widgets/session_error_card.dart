@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/audio/asr_engine.dart';
 import '../../../core/platform/app_settings.dart';
+import '../../../core/ui/app_toast.dart';
 import '../application/chat_session_state.dart';
 import '../application/speech_session_controller.dart';
 
@@ -47,9 +48,7 @@ class SessionErrorCard extends ConsumerWidget {
         await (onOpenSettings ?? AppSettings.open)();
       } on PlatformException {
         if (!context.mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('无法打开系统设置，请手动为应用开启麦克风权限')),
-        );
+        AppToast.error(context, '无法打开系统设置，请手动为应用开启麦克风权限');
       }
     }
 

@@ -299,32 +299,26 @@ extension NativeAsrEventDecoder on Object? {
 
 AsrErrorKind _mapAsrError(int code) {
   // Two sender conventions share this channel:
-  //   - Android `SpeechRecognizer.ERROR_*` (1–9). The real values are:
-  //       1=NETWORK_TIMEOUT, 2=NETWORK, 3=AUDIO,
-  //       5=INSUFFICIENT_PERMISSIONS, 6=SERVER,
-  //       7=RECOGNIZER_BUSY, 8=NO_MATCH, 9=SPEECH_TIMEOUT.
-  //   - `AsrService` native-runtime convention (P1-4 stub):
-  //       4=microphone permission denied,
-  //       9=no model loaded (will switch to 1001/1002 once P1-5 ships).
+  //   - Android `SpeechRecognizer.ERROR_*`: 4=SERVER, 5=CLIENT,
+  //       6=SPEECH_TIMEOUT, 7=NO_MATCH, 8=RECOGNIZER_BUSY,
+  //       9=INSUFFICIENT_PERMISSIONS.
+  //   - `AsrService` native-runtime convention:
+  //       1001=microphone permission denied, 1002=no model loaded.
+  // Keep the namespaces exact: Android error 5 is not a permission error.
   switch (code) {
     // Permission family.
-    case 4: // AsrService: permission denied.
-    case 5: // SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS.
-    case 1001:
+    case 9: // SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS.
+    case 1001: // AsrService: permission denied.
       return AsrErrorKind.permissionDenied;
     // Model missing.
     case 1002:
       return AsrErrorKind.modelMissing;
     // Recogniser busy / rate-limited.
-    case 7: // SpeechRecognizer.ERROR_RECOGNIZER_BUSY.
+    case 8: // SpeechRecognizer.ERROR_RECOGNIZER_BUSY.
       return AsrErrorKind.busy;
-    // Timeout-ish network / matching failures.
+    // Timeout failures.
     case 1: // SpeechRecognizer.ERROR_NETWORK_TIMEOUT.
-    case 6: // SpeechRecognizer.ERROR_SERVER.
-    case 8: // SpeechRecognizer.ERROR_NO_MATCH.
-    case 9: // SpeechRecognizer.ERROR_SPEECH_TIMEOUT. NOTE: collides with
-            // AsrService's legacy model-missing code; the native path wins
-            // once P1-5 lands and that side moves to 1002.
+    case 6: // SpeechRecognizer.ERROR_SPEECH_TIMEOUT.
       return AsrErrorKind.timeout;
     default:
       return AsrErrorKind.unknown;

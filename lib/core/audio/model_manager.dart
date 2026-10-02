@@ -105,10 +105,14 @@ class InstalledModelRecord {
   final DateTime? installedAt;
 }
 
-/// Read-side contract for the model manager. The Dart side wires
-/// [ModelDownloadService] for downloads and an [AsrModelProfile] /
-/// qwen3Tts06B lookup to decide which manifest to use; the Kotlin side
-/// delegates to the same SQLite `model_records` table.
+/// Read-side contract for the model manager. The Kotlin
+/// `ModelManager` is the production implementation and delegates to the
+/// same SQLite `model_records` table as the Dart-side
+/// [ModelDownloadService]. The Dart side does not instantiate this
+/// interface in production; it exists here so widget tests can swap in a
+/// fake and so the contract stays reviewable next to the Dart code
+/// that calls into it. Method signatures match the Kotlin
+/// implementation byte-for-byte — keep them in sync when extending.
 abstract interface class ModelManager {
   /// Returns the manifest known for [id], or `null` if unknown.
   ModelManifest? manifestFor(String modelId);

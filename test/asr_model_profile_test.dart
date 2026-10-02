@@ -59,9 +59,9 @@ void main() {
     });
 
     test('decodes ASR_ERROR with permission code into AsrFailure', () {
-      // 4 = AsrService `Microphone permission denied` (P1-4 convention),
-      // 5 = Android SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS.
-      for (final code in [4, 5]) {
+      // 9 = Android SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS;
+      // 1001 = AsrService `Microphone permission denied`.
+      for (final code in [9, 1001]) {
         final result = <String, Object?>{
           'type': 'ASR_ERROR',
           'payload': {'code': code, 'message': 'denied'},
@@ -72,9 +72,8 @@ void main() {
     });
 
     test('does not mistake Android server/client failures for permission denial', () {
-      // 1 = NETWORK_TIMEOUT, 6 = SERVER, 8 = NO_MATCH are all timeout-ish
-      // server-side errors, not permission failures.
-      for (final code in [1, 6, 8]) {
+      // 4 = SERVER, 5 = CLIENT, and 7 = NO_MATCH are not permission errors.
+      for (final code in [4, 5, 7]) {
         final result = <String, Object?>{
           'type': 'ASR_ERROR',
           'payload': {'code': code, 'message': 'recognizer failed'},

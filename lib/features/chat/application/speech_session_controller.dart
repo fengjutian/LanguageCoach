@@ -141,36 +141,62 @@ class SpeechSessionController extends Notifier<SpeechSessionState> {
   Future<void> start() async {
     final bridge = ref.read(nativeAiBridgeProvider);
     final language = ref.read(resolvedAsrLanguageProvider);
-    state = state.copyWith(
-      listening: true,
-      partialText: '',
-      clearError: true,
-    );
-    if (_readEngine() == AsrEngineChoice.system || _readEngine() == AsrEngineChoice.auto) {
-      await bridge.startListening(language: language);
-    } else {
-      await bridge.startAsrCapture(preferredAsrLanguage: language);
+    try {
+      if (_readEngine() == AsrEngineChoice.system ||
+          _readEngine() == AsrEngineChoice.auto) {
+        await bridge.startListening(language: language);
+      } else {
+        await bridge.startAsrCapture(preferredAsrLanguage: language);
+      }
+      state = state.copyWith(
+        listening: true,
+        partialText: '',
+        clearError: true,
+      );
+    } catch (_) {
+      // Bridge refused the capture (missing model, no permission,
+      // platform-channel failure, etc.). Flip listening back off and
+      // surface an unknown error — the previous version set
+      // `listening: true` before awaiting the bridge, which left the
+      // UI stuck in the "listening" state with no capture actually
+      // running when the platform call threw.
+      state = state.copyWith(
+        listening: false,
+        lastError: AsrErrorKind.unknown,
+      );
+      rethrow;
     }
   }
 
   Future<void> stop() async {
     final bridge = ref.read(nativeAiBridgeProvider);
-    if (_readEngine() == AsrEngineChoice.system || _readEngine() == AsrEngineChoice.auto) {
-      await bridge.stopListening();
-    } else {
-      await bridge.stopAsrCapture();
+    try {
+      if (_readEngine() == AsrEngineChoice.system ||
+          _readEngine() == AsrEngineChoice.auto) {
+        await bridge.stopListening();
+      } else {
+        await bridge.stopAsrCapture();
+      }
+      state = state.copyWith(listening: false, partialText: '');
+    } catch (_) {
+      state = state.copyWith(listening: false);
     }
-    state = state.copyWith(listening: false);
   }
 
   Future<void> cancel() async {
     final bridge = ref.read(nativeAiBridgeProvider);
-    if (_readEngine() == AsrEngineChoice.system || _readEngine() == AsrEngineChoice.auto) {
-      await bridge.cancelListening();
-    } else {
-      await bridge.cancelAsrCapture();
+    try {
+      if (_readEngine() == AsrEngineChoice.system ||
+          _readEngine() == AsrEngineChoice.auto) {
+        await bridge.cancelListening();
+      } else {
+        await bridge.cancelAsrCapture();
+      }
+    } catch (_) {
+      // Best-effort — the local state still flips back to idle so the
+      // UI can recover even if the platform channel is unresponsive.
     }
-    state = state.copyWith(listening: false);
+    state = state.copyWith(listening: false, partialText: '');
   }
 
   /// Attempt to load the best-fit ASR profile for the resolved language.

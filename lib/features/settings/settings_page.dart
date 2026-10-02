@@ -10,6 +10,7 @@ import '../../core/models/app_settings.dart';
 import '../../core/models/chat_models.dart';
 import '../../core/network/api_client.dart';
 import '../../core/security/secure_key_store.dart';
+import '../../core/ui/app_toast.dart';
 import '../chat/application/conversation_providers.dart';
 import 'application/api_keys_controller.dart';
 import 'application/model_controller.dart';
@@ -328,17 +329,13 @@ class _KeyCardState extends ConsumerState<_KeyCard> {
     if (!mounted) return;
     setState(() => _isEditing = false);
     _inputController.clear();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('${widget.label} Key 已保存')),
-    );
+    AppToast.success(context, '${widget.label} Key 已保存');
   }
 
   Future<void> _delete() async {
     await ref.read(apiKeysControllerProvider.notifier).delete(widget.slot);
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('${widget.label} Key 已删除')),
-    );
+    AppToast.success(context, '${widget.label} Key 已删除');
   }
 
   Future<void> _test() async {
@@ -346,8 +343,7 @@ class _KeyCardState extends ConsumerState<_KeyCard> {
     final message = await widget.tester.run(ref);
     if (!mounted) return;
     setState(() => _busy = false);
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message)));
+    AppToast.show(context, message);
   }
 
   @override
@@ -674,9 +670,8 @@ class _ModelCard extends ConsumerWidget {
                     onPressed: () async {
                       final ok = await controller.load(entry.manifest.id);
                       if (!context.mounted) return;
-                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                          content:
-                              Text(ok ? '已加载 ${entry.manifest.id}' : '加载失败')));
+                      AppToast.show(context,
+                          ok ? '已加载 ${entry.manifest.id}' : '加载失败');
                     },
                     icon: const Icon(Icons.play_circle_outline),
                     label: const Text('加载'),

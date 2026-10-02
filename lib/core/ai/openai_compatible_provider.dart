@@ -114,7 +114,7 @@ JSON object (no prose, no markdown fences) matching this schema:
     var emittedError = false;
 
     try {
-      await for (final chunk in stream.transform(utf8.decoder)) {
+      await for (final chunk in utf8.decoder.bind(stream)) {
         for (final event in _splitSseEvents(chunk)) {
           if (event.data.isEmpty) continue;
           if (event.data == '[DONE]') {

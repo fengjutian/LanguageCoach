@@ -21,16 +21,20 @@ abstract interface class AudioCaptureService {
   Future<void> stop();
 }
 
-/// Voice-activity detection. Real impl is a sherpa-onnx VAD; the in-memory
-/// test impl always reports `speech`.
+/// Voice-activity detection. **Host-only stub**: production VAD runs in
+/// `Kotlin AsrService` and is exposed through
+/// `NativeAiBridge.startAsrCapture(silenceTimeoutMs: ...)`. This interface
+/// exists for Dart-side unit tests that exercise the ASR pipeline without
+/// the platform channel — `feed`/`dispose` mirror the minimum surface the
+/// engine consumes, with the actual speech-detection logic replaced by a
+/// `speech` constant. There is no silence-timeout / speech-end event on
+/// this interface; auto-stop lives on the Kotlin side.
 abstract interface class VadEngine {
   /// Feed the VAD with the same PCM frames the ASR sees. The VAD is
   /// stateless — it just classifies windows of input.
   void feed(PcmFrame frame);
 
-  /// Triggered when the user pauses longer than [silenceTimeoutMs] while
-  /// the VAD still considers them as speaking — the runtime fires this so
-  /// the UI can auto-stop.
+  /// Release the VAD. The native counterpart frees its JNI handle here.
   Future<void> dispose();
 }
 

@@ -1,10 +1,75 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/audio/audio_player.dart';
 import '../../../core/models/chat_models.dart';
 import '../../settings/application/settings_controller.dart';
 import '../application/tts_controller.dart';
+
+/// Quick check for inline / block-level markdown markers. We don't try to be
+/// exhaustive — anything that *might* be markdown routes through [MarkdownBody]
+/// so we don't surface raw `**`/`[]()` to users. Plain prose stays on a `Text`
+/// widget, which keeps the existing `find.text(...)` widget tests stable.
+bool _looksLikeMarkdown(String text) {
+  if (text.isEmpty) return false;
+  return RegExp(
+    r'(\*\*|\*|`|~~|\[.+\]\(.+\)|^#{1,6}\s|^\s*[-+*]\s|^\s*\d+\.\s|^\s*>|\n\n)',
+    multiLine: true,
+  ).hasMatch(text);
+}
+
+/// Renders [text] as plain text most of the time, but switches to a markdown
+/// pipeline whenever the content looks like markdown. Styles inherit from the
+/// caller-supplied [style] so headings / bold / italic all keep the same base
+/// typography as the surrounding bubble.
+class _BubbleText extends StatelessWidget {
+  const _BubbleText({required this.text, this.style});
+
+  final String text;
+  final TextStyle? style;
+
+  @override
+  Widget build(BuildContext context) {
+    final base = style ?? DefaultTextStyle.of(context).style;
+    if (!_looksLikeMarkdown(text)) {
+      return Text(text, style: base);
+    }
+    final muted = base.color ?? Colors.black87;
+    final sheet = MarkdownStyleSheet(
+      p: base,
+      strong: base.copyWith(fontWeight: FontWeight.w700),
+      em: base.copyWith(fontStyle: FontStyle.italic),
+      del: base.copyWith(decoration: TextDecoration.lineThrough),
+      h1: base.copyWith(fontSize: (base.fontSize ?? 14) * 1.6, fontWeight: FontWeight.w700),
+      h2: base.copyWith(fontSize: (base.fontSize ?? 14) * 1.4, fontWeight: FontWeight.w700),
+      h3: base.copyWith(fontSize: (base.fontSize ?? 14) * 1.2, fontWeight: FontWeight.w700),
+      code: base.copyWith(
+        fontFamily: 'monospace',
+        backgroundColor: Colors.black12,
+      ),
+      codeblockDecoration: BoxDecoration(
+        color: Colors.black12,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      codeblockPadding: const EdgeInsets.all(8),
+      blockquote: base.copyWith(color: muted.withValues(alpha: 0.7)),
+      blockquoteDecoration: const BoxDecoration(
+        border: Border(left: BorderSide(color: Colors.black26, width: 3)),
+      ),
+      blockquotePadding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+      horizontalRuleDecoration: const BoxDecoration(
+        border: Border(top: BorderSide(color: Colors.black12, width: 1)),
+      ),
+    );
+    return MarkdownBody(
+      data: text,
+      styleSheet: sheet,
+      shrinkWrap: true,
+      fitContent: true,
+    );
+  }
+}
 
 /// Speech-speed stops mirrored from the settings page so the bubble on every
 /// message stays in lock-step with the chosen value.
@@ -71,8 +136,8 @@ class MessageBubble extends ConsumerWidget {
             ],
           ),
           const SizedBox(height: 14),
-          Text(
-            response.primary,
+          _BubbleText(
+            text: response.primary,
             style: const TextStyle(
               fontSize: 22,
               fontWeight: FontWeight.w700,
@@ -81,8 +146,8 @@ class MessageBubble extends ConsumerWidget {
           ),
           if (response.alternatives.isNotEmpty) ...[
             const SizedBox(height: 6),
-            Text(
-              response.alternatives.first,
+            _BubbleText(
+              text: response.alternatives.first,
               style: const TextStyle(color: Colors.black54),
             ),
           ],
@@ -113,7 +178,7 @@ class MessageBubble extends ConsumerWidget {
           const Divider(height: 28),
           const Text('解释', style: TextStyle(fontWeight: FontWeight.w700)),
           const SizedBox(height: 6),
-          Text(response.explanation),
+          _BubbleText(text: response.explanation),
           const SizedBox(height: 14),
           if (response.sentences.isEmpty)
             const Text('（该回复未提供逐句）', style: TextStyle(color: Colors.black45))
@@ -278,8 +343,8 @@ class _SentenceTile extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    text,
+                  _BubbleText(
+                    text: text,
                     style: TextStyle(
                       fontWeight: isPlaying ? FontWeight.w700 : FontWeight.w400,
                     ),

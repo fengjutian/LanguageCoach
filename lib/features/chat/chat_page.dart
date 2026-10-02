@@ -12,6 +12,7 @@ import '../../core/models/chat_models.dart';
 import '../../core/native/native_ai_bridge.dart';
 import '../../core/network/api_client.dart';
 import '../../core/repositories/sqlite_conversation_repository.dart';
+import '../../core/ui/app_toast.dart';
 import '../settings/application/settings_controller.dart';
 import 'application/chat_session_state.dart';
 import 'application/conversation_providers.dart';
@@ -150,8 +151,7 @@ class _ChatPageState extends ConsumerState<ChatPage> {
 
   void _showVoiceError(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message)));
+    AppToast.error(context, message);
   }
 
   Future<void> send() async {

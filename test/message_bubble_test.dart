@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:language_coach/core/audio/audio_player.dart';
@@ -95,5 +96,40 @@ void main() {
     await tester.pump(const Duration(milliseconds: 50));
     final state = container.read(ttsControllerProvider);
     expect(state.currentSentenceId, 's_msg1_1');
+  });
+
+  testWidgets('renders markdown in primary as rich text', (tester) async {
+    final message = ChatMessage(
+      id: 'msg_md',
+      role: MessageRole.assistant,
+      createdAt: DateTime(2026),
+      response: const CoachResponse(
+        intent: CoachIntent.explanation,
+        sourceLanguage: 'en',
+        targetLanguage: 'zh',
+        primary: 'It is **raining**.',
+        explanation: '- use *present progressive*\n- add an adverb',
+        sentences: [],
+      ),
+      model: 'Test',
+    );
+    await tester.pumpWidget(_wrap(
+      MessageBubble(message: message, conversationId: 'c1'),
+    ));
+
+    // Markdown content should NOT show raw markers to the user.
+    expect(find.textContaining('**raining**'), findsNothing);
+    expect(find.textContaining('*present progressive*'), findsNothing);
+
+    // And the Markdown widget should be in the tree.
+    expect(find.byType(MarkdownBody), findsWidgets);
+  });
+
+  testWidgets('plain prose stays on a Text widget', (tester) async {
+    await tester.pumpWidget(_wrap(
+      MessageBubble(message: _sampleMessage(), conversationId: 'c1'),
+    ));
+    expect(find.byType(MarkdownBody), findsNothing);
+    expect(find.text('It is raining today.'), findsOneWidget);
   });
 }

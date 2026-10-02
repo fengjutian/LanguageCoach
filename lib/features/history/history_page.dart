@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/ui/app_toast.dart';
 import '../settings/application/settings_controller.dart';
 import 'application/conversation_export_providers.dart';
 import 'application/history_controller.dart';
@@ -52,26 +53,19 @@ class _HistoryPageState extends ConsumerState<HistoryPage> {
         .read(settingsControllerProvider.notifier)
         .setLastConversationId(conversationId);
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('已恢复该对话。请回到对话页查看。')),
-    );
+    AppToast.success(context, '已恢复该对话。请回到对话页查看。');
   }
 
   Future<void> _exportConversation(String conversationId) async {
-    final messenger = ScaffoldMessenger.of(context);
     try {
       final path = await ref.read(
         exportConversationProvider(conversationId).future,
       );
       if (!mounted) return;
-      messenger.showSnackBar(
-        SnackBar(content: Text('已导出到 $path')),
-      );
+      AppToast.success(context, '已导出到 $path');
     } catch (e) {
       if (!mounted) return;
-      messenger.showSnackBar(
-        SnackBar(content: Text('导出失败：$e')),
-      );
+      AppToast.error(context, '导出失败：$e');
     }
   }
 
