@@ -1,64 +1,55 @@
 package com.languagecoach.language_coach
 
 import android.os.SystemClock
-import android.util.Log
+import com.qwen.tts.studio.engine.QwenEngine
 import java.io.File
+import java.io.OutputStream
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
-/**
- * Local Qwen3-TTS runtime stub. The actual JNI calls live in
- * `libqwen_tts_jni.so` and are wired in once the model artifacts ship in
- * P1-5. Until then this class pretends to load a model, runs a no-op
- * synthesis that writes a 44-byte WAV header, and surfaces all the
- * lifecycle hooks the Flutter side expects.
- *
- * Thread-safety: lifecycle calls may land on the platform thread or a
- * background thread; [canceled] is the only mutable state and uses an
- * [AtomicBoolean].
- */
+/** Owns the resident qwen3-tts.cpp context and writes its PCM output as WAV. */
 class TtsService(private val cacheDirectory: File) {
-    private val loaded = AtomicBoolean(false)
-    private val modelId = AtomicLong(0)
-    private val canceled = AtomicBoolean(false)
+    private var engine: QwenEngine? = null
+    private var loadedModelId: String? = null
+    private val synthesizing = AtomicBoolean(false)
     private val peakRssKb = AtomicLong(0)
+    private val lastSynthesisMs = AtomicLong(0)
+    private val lastSampleCount = AtomicLong(0)
 
-    /** True once `loadModel` has finished and the runtime can synthesize. */
-    fun isLoaded(): Boolean = loaded.get()
+    fun isLoaded(): Boolean = engine != null
 
-    /**
-     * "Load" the Qwen3-TTS runtime. Returns the [modelId] the runtime
-     * assigned (the caller passes its manifest id; the runtime echoes it
-     * after warming up its internal tables).
-     */
+    @Synchronized
     fun loadModel(modelId: String, manifestJson: String?, localDirectory: String?): String {
-        // JNI hook (filled in once the native library is built):
-        //   nativeLoad(localDirectory ?: cacheDirectory.absolutePath + "/models")
-        Log.i(TAG, "loadModel id=$modelId local=$localDirectory")
-        loaded.set(true)
-        this.modelId.set(SystemClock.uptimeMillis())
+        require(!localDirectory.isNullOrBlank()) { "Model directory is required" }
+        val directory = File(localDirectory)
+        require(directory.isDirectory) { "Model directory does not exist: $localDirectory" }
+        val talker = File(directory, TALKER_FILE)
+        require(talker.isFile) { "Missing $TALKER_FILE" }
+        require(File(directory, TOKENIZER_FILE).isFile) { "Missing $TOKENIZER_FILE" }
+
+        engine?.close()
+        engine = null
+        val candidate = QwenEngine()
+        candidate.setCpuThreads((Runtime.getRuntime().availableProcessors() - 1).coerceIn(1, 8))
+        if (!candidate.loadModels(directory.absolutePath, talker.name)) {
+            val message = candidate.getLastError() ?: "qwen3-tts.cpp rejected the model"
+            candidate.close()
+            error(message)
+        }
+        check(candidate.getModelCapabilities()?.loaded == true) {
+            "Native runtime did not report a loaded model"
+        }
+        engine = candidate
+        loadedModelId = modelId
+        peakRssKb.updateAndGet { maxOf(it, currentRssKb()) }
         return modelId
     }
 
-    /**
-     * First-call priming. Returns elapsed milliseconds — the benchmark
-     * page uses this to populate `model_load_ms`.
-     */
     fun warmupModel(modelId: String): Int {
-        check(loaded.get()) { "warmup before loadModel for $modelId" }
-        val start = SystemClock.uptimeMillis()
-        // JNI hook: nativeWarmup()
-        val elapsed = (SystemClock.uptimeMillis() - start).toInt()
-        Log.i(TAG, "warmupModel id=$modelId ms=$elapsed")
-        return elapsed
+        check(engine != null && loadedModelId == modelId) { "Model is not loaded: $modelId" }
+        return 0
     }
 
-    /**
-     * Run one synthesis. Writes a placeholder WAV file at
-     * `cacheDirectory/synth_{hash}.wav` and returns the absolute path.
-     * The Flutter side copies that file into [AudioCacheRepository] when
-     * the call returns.
-     */
     fun synthesize(
         text: String,
         language: String,
@@ -66,89 +57,116 @@ class TtsService(private val cacheDirectory: File) {
         speed: Double,
         model: String?,
     ): String {
-        check(loaded.get()) { "synthesize before loadModel" }
-        canceled.set(false)
-        val filename = "synth_${text.hashCode()}_${System.nanoTime()}.wav"
-        val target = File(cacheDirectory, filename)
-        target.parentFile?.mkdirs()
-        // JNI hook: nativeSynthesize(text, language, voice, speed, target.absolutePath)
-        //   returns elapsedMs, peakRssKb, sampleCount — TtsService records
-        //   them in the benchmark snapshot.
-        WAV_HEADER_PLACEHOLDER.let { target.writeBytes(it) }
-        peakRssKb.updateAndGet { maxOf(it, currentRssKb()) }
-        Log.i(
-            TAG,
-            "synthesize text='${text.take(32)}' lang=$language voice=$voice " +
-                "model=${model ?: "default"} -> ${target.absolutePath}",
-        )
-        return target.absolutePath
+        require(text.isNotBlank()) { "Text must not be blank" }
+        require(speed in 0.5..2.0) { "Speed must be between 0.5 and 2.0" }
+        val active = checkNotNull(engine) { "Qwen3-TTS model is not loaded" }
+        check(synthesizing.compareAndSet(false, true)) { "A synthesis is already running" }
+        try {
+            val started = SystemClock.elapsedRealtime()
+            val result = active.synthesize(
+                text,
+                QwenEngine.NativeParams(
+                    languageId = languageId(language),
+                    speaker = speaker(language, voice),
+                ),
+            )
+            check(result.success) { result.errorMsg ?: "Native synthesis failed" }
+            val samples = result.audio
+            check(!samples.isNullOrEmpty() && result.sampleRate > 0) {
+                "Native synthesis returned no audio"
+            }
+            val target = File(cacheDirectory, "synth_${text.hashCode()}_${System.nanoTime()}.wav")
+            target.parentFile?.mkdirs()
+            target.outputStream().buffered().use { writeWav(it, samples, result.sampleRate) }
+            check(target.length() > WAV_HEADER_BYTES) { "Generated WAV contains no PCM samples" }
+            peakRssKb.updateAndGet { maxOf(it, currentRssKb()) }
+            lastSynthesisMs.set(SystemClock.elapsedRealtime() - started)
+            lastSampleCount.set(samples.size.toLong())
+            return target.absolutePath
+        } finally {
+            synthesizing.set(false)
+        }
     }
 
-    /** Best-effort cancel — flips the flag the JNI loop polls. */
-    fun cancelSynthesis(): Boolean {
-        if (!loaded.get()) return false
-        canceled.set(true)
-        // JNI hook: nativeCancel() — may return true if a job was running.
-        return true
-    }
+    /** qwen3-tts.cpp currently has no cooperative cancellation ABI. */
+    fun cancelSynthesis(): Boolean = false
 
-    /** Release the runtime's resources. Safe to call when not loaded. */
+    @Synchronized
     fun unloadModel(modelId: String) {
-        if (!loaded.get()) return
-        // JNI hook: nativeUnload()
-        loaded.set(false)
-        Log.i(TAG, "unloadModel id=$modelId")
+        if (loadedModelId != modelId) return
+        engine?.close()
+        engine = null
+        loadedModelId = null
     }
 
-    /**
-     * Snapshot for the benchmark page. All values come from Android
-     * framework APIs; the JNI side will overwrite the temperature / peak
-     * rss once the model is resident.
-     */
-    fun benchmarkSnapshot(): Map<String, Any> {
-        return mapOf(
-            "isLoaded" to isLoaded(),
-            "peakRssKb" to peakRssKb.get().coerceAtLeast(currentRssKb()),
-            "currentRssKb" to currentRssKb(),
-            "threadCount" to Thread.activeCount(),
-        )
-    }
+    fun benchmarkSnapshot(): Map<String, Any> = mapOf(
+        "isLoaded" to isLoaded(),
+        "isSynthesizing" to synthesizing.get(),
+        "peakRssKb" to peakRssKb.get().coerceAtLeast(currentRssKb()),
+        "currentRssKb" to currentRssKb(),
+        "threadCount" to Thread.activeCount(),
+        "lastSynthesisMs" to lastSynthesisMs.get(),
+        "lastSampleCount" to lastSampleCount.get(),
+    )
 
     private fun currentRssKb(): Long {
         val runtime = Runtime.getRuntime()
-        val used = runtime.totalMemory() - runtime.freeMemory()
-        return used / 1024
+        return (runtime.totalMemory() - runtime.freeMemory()) / 1024
+    }
+
+    private fun languageId(language: String): Int = when (language.lowercase()) {
+        "de", "de-de", "german" -> 2053
+        "es", "es-es", "spanish" -> 2054
+        "zh", "zh-cn", "chinese" -> 2055
+        "ja", "ja-jp", "japanese" -> 2058
+        "fr", "fr-fr", "french" -> 2061
+        "ko", "ko-kr", "korean" -> 2064
+        "ru", "ru-ru", "russian" -> 2069
+        else -> 2050
+    }
+
+    private fun speaker(language: String, voice: String): String = when {
+        voice.equals("vivian", true) -> "vivian"
+        voice.equals("serena", true) || voice.contains("female_warm") -> "serena"
+        voice.equals("ryan", true) -> "ryan"
+        language.startsWith("ja", true) -> "ono_anna"
+        language.startsWith("ko", true) -> "sohee"
+        language.startsWith("zh", true) -> "vivian"
+        else -> "ryan"
+    }
+
+    private fun writeWav(output: OutputStream, samples: FloatArray, sampleRate: Int) {
+        val dataBytes = samples.size * 2
+        output.writeAscii("RIFF")
+        output.writeIntLe(36 + dataBytes)
+        output.writeAscii("WAVEfmt ")
+        output.writeIntLe(16)
+        output.writeShortLe(1)
+        output.writeShortLe(1)
+        output.writeIntLe(sampleRate)
+        output.writeIntLe(sampleRate * 2)
+        output.writeShortLe(2)
+        output.writeShortLe(16)
+        output.writeAscii("data")
+        output.writeIntLe(dataBytes)
+        samples.forEach { output.writeShortLe((it.coerceIn(-1f, 1f) * 32767f).toInt()) }
+    }
+
+    private fun OutputStream.writeAscii(value: String) = write(value.toByteArray(Charsets.US_ASCII))
+    private fun OutputStream.writeIntLe(value: Int) {
+        write(value and 0xff)
+        write(value ushr 8 and 0xff)
+        write(value ushr 16 and 0xff)
+        write(value ushr 24 and 0xff)
+    }
+    private fun OutputStream.writeShortLe(value: Int) {
+        write(value and 0xff)
+        write(value ushr 8 and 0xff)
     }
 
     companion object {
-        private const val TAG = "TtsService"
-
-        // Minimal RIFF/WAVE header pointing at zero PCM data — just enough
-        // for the audio pipeline to load + report its size.
-        private val WAV_HEADER_PLACEHOLDER = byteArrayOf(
-            0x52, 0x49, 0x46, 0x46,
-            0x24, 0x00, 0x00, 0x00,
-            0x57, 0x41, 0x56, 0x45,
-            0x66, 0x6d, 0x74, 0x20,
-            0x10, 0x00, 0x00, 0x00,
-            0x01, 0x00, 0x01, 0x00,
-            0x44, 0xac.toByte(), 0x00, 0x00,
-            0x88.toByte(), 0x58, 0x01, 0x00,
-            0x02, 0x00, 0x10, 0x00,
-            0x64, 0x61, 0x74, 0x61,
-            0x00, 0x00, 0x00, 0x00,
-        )
-
-        init {
-            try {
-                System.loadLibrary("qwen_tts_jni")
-            } catch (e: UnsatisfiedLinkError) {
-                // P1-3 ships the placeholder JNI library alongside the
-                // model artifacts in P1-5. Until then we run with the
-                // stub Kotlin path above so the lifecycle hooks are still
-                // testable end-to-end.
-                Log.w(TAG, "qwen_tts_jni not loaded — using Kotlin stub", e)
-            }
-        }
+        private const val TALKER_FILE = "qwen-talker-0.6b-customvoice-Q4_K_M.gguf"
+        private const val TOKENIZER_FILE = "qwen-tokenizer-12hz-Q4_K_M.gguf"
+        private const val WAV_HEADER_BYTES = 44
     }
 }

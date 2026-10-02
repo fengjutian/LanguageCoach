@@ -148,11 +148,11 @@ void main() {
     expect(
         roles,
         containsAll(<String>[
-          'tokenizer',
           'talker_weights',
-          'decoder_config',
-          'voice_profile',
+          'audio_tokenizer',
         ]));
+    expect(qwen3Tts06B.artifacts, hasLength(2));
+    expect(qwen3Tts06B.sizeBytes, 859852832);
   });
 
   test('loadSelected calls the bridge and records duration', () async {
