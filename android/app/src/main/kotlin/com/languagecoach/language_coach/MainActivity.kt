@@ -281,6 +281,7 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, RecognitionL
     }
 
     private fun startListening(language: String) {
+        val recognitionLanguage = normalizeRecognitionLanguage(language)
         speechRecognizer?.destroy()
         speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this).also {
             it.setRecognitionListener(this)
@@ -290,14 +291,34 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, RecognitionL
                         RecognizerIntent.EXTRA_LANGUAGE_MODEL,
                         RecognizerIntent.LANGUAGE_MODEL_FREE_FORM,
                     )
-                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, language)
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, recognitionLanguage)
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, recognitionLanguage)
                     putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
                     putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
                 },
             )
         }
-        emit("ASR_START", mapOf("language" to language))
+        emit("ASR_START", mapOf("language" to recognitionLanguage))
     }
+
+    /**
+     * Some OEM recognition services reject language-only tags such as `en`
+     * with [SpeechRecognizer.ERROR_CLIENT]. The Flutter settings model uses
+     * those short codes, so expand the supported languages before creating
+     * the recognition request.
+     */
+    private fun normalizeRecognitionLanguage(language: String): String =
+        when (language.trim().replace('_', '-').lowercase()) {
+            "auto", "" -> "en-US"
+            "en" -> "en-US"
+            "zh" -> "zh-CN"
+            "ja" -> "ja-JP"
+            "ko" -> "ko-KR"
+            "fr" -> "fr-FR"
+            "de" -> "de-DE"
+            "es" -> "es-ES"
+            else -> language.trim().replace('_', '-')
+        }
 
     override fun onRequestPermissionsResult(
         requestCode: Int,

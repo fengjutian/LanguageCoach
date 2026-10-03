@@ -40,6 +40,7 @@ class _ChatPageState extends ConsumerState<ChatPage> {
   StreamSubscription<LlmEvent>? replySubscription;
   bool isStreaming = false;
   bool isListening = false;
+  bool _isStartingListening = false;
   bool _atBottom = true;
   String _currentConversationId = '';
   String _lastUserInput = '';
@@ -102,10 +103,13 @@ class _ChatPageState extends ConsumerState<ChatPage> {
   }
 
   Future<void> toggleListening() async {
+    if (_isStartingListening) return;
     if (isListening) {
       await ref.read(nativeAiBridgeProvider).stopListening();
+      if (mounted) setState(() => isListening = false);
       return;
     }
+    setState(() => _isStartingListening = true);
     try {
       final available =
           await ref.read(nativeAiBridgeProvider).isSpeechRecognitionAvailable();
@@ -117,14 +121,36 @@ class _ChatPageState extends ConsumerState<ChatPage> {
             language:
                 ref.read(settingsControllerProvider).preferredLanguage.code,
           );
+      // Do not wait for the first partial transcript to mark the session as
+      // active. Some recognizers never emit partial results, and leaving the
+      // mic in its idle state lets a second tap create another recognizer
+      // while the first one is still listening.
+      if (mounted) setState(() => isListening = true);
     } on PlatformException catch (error) {
+      if (mounted) setState(() => isListening = false);
       _showVoiceError(error.message ?? '无法启动语音识别');
+    } finally {
+      if (mounted) setState(() => _isStartingListening = false);
     }
   }
 
   void _handleNativeEvent(Object? event) {
     if (!mounted) return;
     if (event is! Map) return;
+    final type = event['type'];
+    // Lifecycle events intentionally do not decode to AsrResult, but they
+    // still drive the microphone UI. This also closes the short race between
+    // the platform accepting startListening and the first transcript.
+    if (type == 'ASR_START' ||
+        type == 'ASR_READY' ||
+        type == 'ASR_SPEECH_START') {
+      if (!isListening) setState(() => isListening = true);
+      return;
+    }
+    if (type == 'ASR_CANCELLED') {
+      if (isListening) setState(() => isListening = false);
+      return;
+    }
     final result = event.toAsrResult();
     if (result == null) return;
     switch (result) {
@@ -138,13 +164,16 @@ class _ChatPageState extends ConsumerState<ChatPage> {
         controller.selection =
             TextSelection.collapsed(offset: controller.text.length);
         setState(() => isListening = false);
-      case AsrFailure(:final kind):
+      case AsrFailure(:final kind, :final message):
         setState(() => isListening = false);
-        _showVoiceError(_describeAsrError(kind));
+        _showVoiceError(_describeAsrError(kind, nativeMessage: message));
     }
   }
 
-  String _describeAsrError(AsrErrorKind kind) {
+  String _describeAsrError(
+    AsrErrorKind kind, {
+    String? nativeMessage,
+  }) {
     switch (kind) {
       case AsrErrorKind.permissionDenied:
         return '麦克风权限被拒绝';
@@ -159,7 +188,10 @@ class _ChatPageState extends ConsumerState<ChatPage> {
       case AsrErrorKind.format:
         return '识别结果解析失败';
       case AsrErrorKind.unknown:
-        return '语音识别失败';
+        final detail = nativeMessage?.trim();
+        return detail == null || detail.isEmpty
+            ? '语音识别失败'
+            : '语音识别失败：$detail';
     }
   }
 
