@@ -293,7 +293,7 @@ class TtsController extends Notifier<TtsPlaybackState> {
         messageId: messageId,
         sentenceId: sentenceId,
       );
-      if (cached != null && File(cached.audioPath).existsSync()) {
+      if (cached != null && _containsAudio(File(cached.audioPath))) {
         final map =
             Map<String, SentencePlaybackState>.from(state.sentenceStates);
         map[sentenceId] = SentencePlaybackState.cached;
@@ -353,6 +353,22 @@ class TtsController extends Notifier<TtsPlaybackState> {
       );
       return null;
     }
+  }
+
+  bool _containsAudio(File file) {
+    if (!file.existsSync()) return false;
+    final length = file.lengthSync();
+    if (length != 44) return length > 0;
+    // The former fallback cached a header-only PCM WAV. Do not keep replaying
+    // those silent artifacts after a real speech engine becomes available.
+    final bytes = file.readAsBytesSync();
+    final isWav = bytes.length == 44 &&
+        bytes[0] == 0x52 &&
+        bytes[1] == 0x49 &&
+        bytes[2] == 0x46 &&
+        bytes[3] == 0x46;
+    final hasNoPcmData = bytes.sublist(40, 44).every((byte) => byte == 0);
+    return !(isWav && hasNoPcmData);
   }
 
   Future<void> pause() => _queue.pause();
