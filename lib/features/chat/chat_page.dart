@@ -460,6 +460,8 @@ class _ChatPageState extends ConsumerState<ChatPage> {
               phase: phase,
               error: error,
             ),
+            if (isStreaming)
+              _StopGenerationBar(onStop: stopReply),
             _Composer(
               controller: controller,
               onSend: send,
@@ -771,7 +773,7 @@ class _ScrollToBottomButton extends StatelessWidget {
   }
 }
 
-class _Composer extends StatelessWidget {
+class _Composer extends StatefulWidget {
   const _Composer({
     required this.controller,
     required this.onSend,
@@ -786,49 +788,101 @@ class _Composer extends StatelessWidget {
   final bool isListening;
 
   @override
+  State<_Composer> createState() => _ComposerState();
+}
+
+class _ComposerState extends State<_Composer> {
+  /// Show the character counter only when the input starts to look long —
+  /// community convention is to keep the bottom bar quiet unless the user
+  /// is actively composing a multi-line message.
+  static const _counterThreshold = 160;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.addListener(_onChanged);
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_onChanged);
+    super.dispose();
+  }
+
+  void _onChanged() {
+    if (mounted) setState(() {});
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final controller = widget.controller;
+    final scheme = Theme.of(context).colorScheme;
+    final text = controller.text;
+    final showCounter = text.characters.length >= _counterThreshold;
+    final overLimit = text.characters.length > 500;
+
     return Material(
-      color: Theme.of(context).colorScheme.surface,
+      color: scheme.surface,
       elevation: 8,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-        child: Row(
+        child: Column(
           crossAxisAlignment: CrossAxisAlignment.end,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            IconButton(
-              onPressed: onToggleListening,
-              icon: Icon(isListening ? Icons.stop_circle : Icons.mic_none),
-              color: isListening ? Theme.of(context).colorScheme.error : null,
-              tooltip: isListening ? '停止识别' : '语音输入',
-            ),
-            Expanded(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxHeight: 140),
-                child: TextField(
-                  controller: controller,
-                  minLines: 1,
-                  maxLines: 6,
-                  textInputAction: TextInputAction.send,
-                  keyboardType: TextInputType.multiline,
-                  onSubmitted: (_) => onSend(),
-                  decoration: const InputDecoration(
-                    hintText: '输入你想学习的表达…',
-                    border: InputBorder.none,
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                IconButton(
+                  onPressed: widget.onToggleListening,
+                  icon: Icon(widget.isListening
+                      ? Icons.stop_circle
+                      : Icons.mic_none),
+                  color: widget.isListening ? scheme.error : null,
+                  tooltip: widget.isListening ? '停止识别' : '语音输入',
+                ),
+                Expanded(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 140),
+                    child: TextField(
+                      controller: controller,
+                      minLines: 1,
+                      maxLines: 6,
+                      textInputAction: TextInputAction.send,
+                      keyboardType: TextInputType.multiline,
+                      onSubmitted: (_) => widget.onSend(),
+                      decoration: const InputDecoration(
+                        hintText: '输入你想学习的表达…',
+                        border: InputBorder.none,
+                      ),
+                    ),
                   ),
                 ),
-              ),
+                if (widget.onStop != null)
+                  IconButton(
+                    onPressed: widget.onStop,
+                    icon: const Icon(Icons.stop_circle_outlined),
+                    tooltip: '停止生成',
+                  )
+                else
+                  IconButton.filled(
+                    onPressed: widget.onSend,
+                    icon: const Icon(Icons.arrow_upward_rounded),
+                    tooltip: '发送',
+                  ),
+              ],
             ),
-            if (onStop != null)
-              IconButton(
-                onPressed: onStop,
-                icon: const Icon(Icons.stop_circle_outlined),
-                tooltip: '停止生成',
-              )
-            else
-              IconButton.filled(
-                onPressed: onSend,
-                icon: const Icon(Icons.arrow_upward_rounded),
-                tooltip: '发送',
+            if (showCounter)
+              Padding(
+                padding: const EdgeInsets.only(top: 2, right: 4),
+                child: Text(
+                  '${text.characters.length} / 500',
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: overLimit ? scheme.error : Colors.black45,
+                    fontWeight: overLimit ? FontWeight.w700 : FontWeight.w400,
+                  ),
+                ),
               ),
           ],
         ),
@@ -1067,5 +1121,70 @@ class _ChatDrawer extends ConsumerWidget {
     await ref
         .read(historyControllerProvider.notifier)
         .deleteConversation(conversationId);
+  }
+}
+
+/// Floating "stop generating" pill that surfaces between the status strip
+/// and the composer while the engine is emitting tokens. Doubao / ChatGPT
+/// / Claude all use this affordance — a more discoverable target than the
+/// composer's icon-only stop button, especially during long replies.
+class _StopGenerationBar extends StatelessWidget {
+  const _StopGenerationBar({required this.onStop});
+
+  final VoidCallback onStop;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
+      child: Material(
+        color: scheme.surfaceContainerHighest,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
+        elevation: 0,
+        child: InkWell(
+          onTap: onStop,
+          borderRadius: BorderRadius.circular(20),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: scheme.primary,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                const Text(
+                  '正在生成',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Icon(Icons.stop_circle_outlined,
+                    size: 16, color: scheme.error),
+                const SizedBox(width: 4),
+                const Text(
+                  '停止',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.black87,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }

@@ -8,8 +8,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/audio/audio_cache.dart';
 import '../../../core/audio/audio_player.dart';
 import '../../../core/audio/audio_queue.dart';
-import '../../../core/audio/fake_tts_engine.dart';
 import '../../../core/audio/minimax_tts_engine.dart';
+import '../../../core/audio/native_qwen_tts_engine.dart';
 import '../../../core/audio/sentence_splitter.dart';
 import '../../../core/audio/tts_engine.dart';
 import '../../../core/audio/tts_models.dart';
@@ -104,7 +104,15 @@ final ttsEngineProvider = Provider<TtsEngine>((ref) {
       outputDirectory: outputDir,
     );
   }
-  return FakeTtsEngine(outputDirectory: outputDir);
+  // Without a cloud key, use Android's installed speech engine. The native
+  // bridge automatically prefers a loaded Qwen model and otherwise writes
+  // system TTS output to a real WAV file. The old fallback generated an empty
+  // WAV header, which made playback appear successful while remaining silent.
+  return NativeQwenTtsEngine(
+    bridge: ref.watch(nativeAiBridgeProvider),
+    modelId: 'system',
+    id: 'android-system-tts',
+  );
 });
 
 final ttsOutputDirectoryProvider = Provider<Directory>((ref) {

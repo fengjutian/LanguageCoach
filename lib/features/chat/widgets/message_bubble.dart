@@ -206,14 +206,17 @@ class MessageBubble extends ConsumerWidget {
             _ThinkingExpansion(thinking: response.thinking),
           ],
           const SizedBox(height: 14),
-          _BubbleText(
-            text: response.primary,
-            style: const TextStyle(
-              fontSize: 22,
-              fontWeight: FontWeight.w700,
-              height: 1.3,
+          if (response.primary.isEmpty && isStreaming)
+            const _TypingDots()
+          else
+            _BubbleText(
+              text: response.primary,
+              style: const TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.w700,
+                height: 1.3,
+              ),
             ),
-          ),
           if (response.alternatives.isNotEmpty) ...[
             const SizedBox(height: 6),
             _BubbleText(
@@ -301,6 +304,16 @@ class MessageBubble extends ConsumerWidget {
               onRegenerate: onRegenerate,
             ),
           ],
+          Padding(
+            padding: const EdgeInsets.only(top: 6, left: 4),
+            child: Text(
+              _stamp(message.createdAt),
+              style: const TextStyle(
+                fontSize: 10,
+                color: Colors.black45,
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -647,6 +660,63 @@ class _BubbleIconAction extends StatelessWidget {
           child: Icon(icon, size: 18, color: Colors.black54),
         ),
       ),
+    );
+  }
+}
+
+/// Three-dot pulse placeholder shown while the assistant reply is being
+/// generated but no tokens have arrived yet. Mirrors the ChatGPT / Claude
+/// streaming affordance — keeps the layout stable so the bubble doesn't
+/// jump from empty to full-height the moment the first token lands.
+class _TypingDots extends StatefulWidget {
+  const _TypingDots();
+
+  @override
+  State<_TypingDots> createState() => _TypingDotsState();
+}
+
+class _TypingDotsState extends State<_TypingDots>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller =
+      AnimationController(vsync: this, duration: const Duration(milliseconds: 900))
+        ..repeat();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, _) {
+        final t = _controller.value;
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: List.generate(3, (i) {
+              // Stagger each dot's pulse so it reads as a wave.
+              final phase = (t + i * 0.18) % 1.0;
+              final opacity = 0.35 + 0.65 * (1 - (phase - 0.5).abs() * 2)
+                  .clamp(0.0, 1.0);
+              return Padding(
+                padding: EdgeInsets.only(right: i == 2 ? 0 : 6),
+                child: Container(
+                  width: 7,
+                  height: 7,
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: opacity),
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              );
+            }),
+          ),
+        );
+      },
     );
   }
 }

@@ -25,6 +25,7 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, RecognitionL
     private var pendingAsrProfileId: String? = null
     private var pendingLocalCapture = false
     private var ttsService: TtsService? = null
+    private var systemTtsService: SystemTtsService? = null
     private var asrService: AsrService? = null
     private var llmService: LlmService? = null
     // Track the model ids the runtime currently has resident so
@@ -41,6 +42,7 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, RecognitionL
         val ttsCache = File(filesDir, "tts_scratch")
         if (!ttsCache.exists()) ttsCache.mkdirs()
         ttsService = TtsService(ttsCache)
+        systemTtsService = SystemTtsService(this, ttsCache)
 
         val asrCache = File(filesDir, "asr_scratch")
         if (!asrCache.exists()) asrCache.mkdirs()
@@ -138,7 +140,16 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, RecognitionL
                         val voice = call.argument<String>("voice") ?: "default"
                         val speed = (call.argument<Double>("speed") ?: 1.0)
                         val model = call.argument<String>("model")
-                        try {
+                        if (ttsService?.isLoaded() != true) {
+                            systemTtsService?.synthesize(text, language, speed) { outcome ->
+                                runOnUiThread {
+                                    outcome.fold(
+                                        onSuccess = result::success,
+                                        onFailure = { result.error("TTS_FAILED", it.message, null) },
+                                    )
+                                }
+                            } ?: result.error("TTS_FAILED", "System TTS is unavailable", null)
+                        } else try {
                             val path = ttsService?.synthesize(
                                 text = text,
                                 language = language,
@@ -364,6 +375,7 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, RecognitionL
     }
 
     override fun onDestroy() {
+        systemTtsService?.shutdown()
         speechRecognizer?.destroy()
         speechRecognizer = null
         loadedTtsModelId?.let { ttsService?.unloadModel(it) }
