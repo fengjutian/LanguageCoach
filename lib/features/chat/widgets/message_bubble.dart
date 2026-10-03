@@ -225,28 +225,36 @@ class MessageBubble extends ConsumerWidget {
             ),
           ],
           const SizedBox(height: 14),
-          Wrap(
-            spacing: 6,
-            children: [
-              _PlaybackButton(
-                onWhole: () => tts.playMessage(
-                  conversationId: conversationId,
-                  messageId: message.id,
-                  text: response.primary,
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                _PlaybackButton(
+                  onWhole: () => tts.playMessage(
+                    conversationId: conversationId,
+                    messageId: message.id,
+                    text: response.primary,
+                  ),
+                  onPrev: tts.previous,
+                  onNext: tts.next,
+                  onStop: tts.stop,
+                  state: ttsState,
                 ),
-                onPrev: tts.previous,
-                onNext: tts.next,
-                onStop: tts.stop,
-                state: ttsState,
-              ),
-              ..._kBubbleSpeedStops.map(
-                (speed) => ChoiceChip(
-                  label: Text('${speed}x'),
-                  selected: settings.speechSpeed == speed,
-                  onSelected: (_) => settingsController.setSpeechSpeed(speed),
+                const SizedBox(width: 6),
+                ..._kBubbleSpeedStops.map(
+                  (speed) => Padding(
+                    padding: const EdgeInsets.only(right: 6),
+                    child: ChoiceChip(
+                      label: Text('${speed}x'),
+                      selected: settings.speechSpeed == speed,
+                      onSelected: (_) =>
+                          settingsController.setSpeechSpeed(speed),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
           const Divider(height: 28),
           const Text('解释', style: TextStyle(fontWeight: FontWeight.w700)),

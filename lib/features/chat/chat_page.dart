@@ -10,7 +10,6 @@ import '../../core/audio/asr_engine.dart';
 import '../../core/database/app_database_provider.dart';
 import '../../core/models/app_settings.dart';
 import '../../core/models/chat_models.dart';
-import '../../core/native/native_ai_bridge.dart';
 import '../../core/network/api_client.dart';
 import '../../core/repositories/sqlite_conversation_repository.dart';
 import '../../core/ui/app_toast.dart';
@@ -18,6 +17,7 @@ import '../history/application/history_controller.dart';
 import '../settings/application/settings_controller.dart';
 import 'application/chat_session_state.dart';
 import 'application/conversation_providers.dart';
+import 'application/speech_session_controller.dart';
 import 'application/waveform_controller.dart';
 import 'widgets/message_bubble.dart';
 import 'widgets/session_character.dart';
@@ -36,11 +36,8 @@ class _ChatPageState extends ConsumerState<ChatPage> {
   final scrollController = ScrollController();
   final messages = <ChatMessage>[];
   final _uuid = const Uuid();
-  StreamSubscription<Object?>? nativeEventSubscription;
   StreamSubscription<LlmEvent>? replySubscription;
   bool isStreaming = false;
-  bool isListening = false;
-  bool _isStartingListening = false;
   bool _atBottom = true;
   String _currentConversationId = '';
   String _lastUserInput = '';
@@ -49,11 +46,6 @@ class _ChatPageState extends ConsumerState<ChatPage> {
   @override
   void initState() {
     super.initState();
-    final bridge = ref.read(nativeAiBridgeProvider);
-    nativeEventSubscription = bridge.eventStream.listen(
-      _handleNativeEvent,
-      onError: (Object error) => _showVoiceError(error.toString()),
-    );
     scrollController.addListener(_onScroll);
     WidgetsBinding.instance.addPostFrameCallback((_) => _hydrate());
   }
@@ -91,82 +83,31 @@ class _ChatPageState extends ConsumerState<ChatPage> {
 
   @override
   void dispose() {
-    nativeEventSubscription?.cancel();
     replySubscription?.cancel();
     scrollController.removeListener(_onScroll);
-    if (isListening) {
-      unawaited(ref.read(nativeAiBridgeProvider).cancelListening());
-    }
     controller.dispose();
     scrollController.dispose();
     super.dispose();
   }
 
   Future<void> toggleListening() async {
-    if (_isStartingListening) return;
-    if (isListening) {
-      await ref.read(nativeAiBridgeProvider).stopListening();
-      if (mounted) setState(() => isListening = false);
+    final controller = ref.read(speechSessionControllerProvider.notifier);
+    final state = ref.read(speechSessionControllerProvider);
+    if (state.listening) {
+      await controller.stop();
       return;
     }
-    setState(() => _isStartingListening = true);
+    // Surface a friendly error if the runtime hasn't loaded a profile yet
+    // — the controller would also fail, but with a less actionable message.
+    final ready = await controller.ensureEngineReady();
+    if (!ready) {
+      _showVoiceError('当前设备没有可用的语音识别服务');
+      return;
+    }
     try {
-      final available =
-          await ref.read(nativeAiBridgeProvider).isSpeechRecognitionAvailable();
-      if (!available) {
-        _showVoiceError('当前设备没有可用的语音识别服务');
-        return;
-      }
-      await ref.read(nativeAiBridgeProvider).startListening(
-            language:
-                ref.read(settingsControllerProvider).preferredLanguage.code,
-          );
-      // Do not wait for the first partial transcript to mark the session as
-      // active. Some recognizers never emit partial results, and leaving the
-      // mic in its idle state lets a second tap create another recognizer
-      // while the first one is still listening.
-      if (mounted) setState(() => isListening = true);
+      await controller.start();
     } on PlatformException catch (error) {
-      if (mounted) setState(() => isListening = false);
       _showVoiceError(error.message ?? '无法启动语音识别');
-    } finally {
-      if (mounted) setState(() => _isStartingListening = false);
-    }
-  }
-
-  void _handleNativeEvent(Object? event) {
-    if (!mounted) return;
-    if (event is! Map) return;
-    final type = event['type'];
-    // Lifecycle events intentionally do not decode to AsrResult, but they
-    // still drive the microphone UI. This also closes the short race between
-    // the platform accepting startListening and the first transcript.
-    if (type == 'ASR_START' ||
-        type == 'ASR_READY' ||
-        type == 'ASR_SPEECH_START') {
-      if (!isListening) setState(() => isListening = true);
-      return;
-    }
-    if (type == 'ASR_CANCELLED') {
-      if (isListening) setState(() => isListening = false);
-      return;
-    }
-    final result = event.toAsrResult();
-    if (result == null) return;
-    switch (result) {
-      case AsrPartial(:final text):
-        controller.text = text;
-        controller.selection =
-            TextSelection.collapsed(offset: controller.text.length);
-        setState(() => isListening = true);
-      case AsrFinal(:final text):
-        controller.text = text;
-        controller.selection =
-            TextSelection.collapsed(offset: controller.text.length);
-        setState(() => isListening = false);
-      case AsrFailure(:final kind, :final message):
-        setState(() => isListening = false);
-        _showVoiceError(_describeAsrError(kind, nativeMessage: message));
     }
   }
 
@@ -432,6 +373,27 @@ class _ChatPageState extends ConsumerState<ChatPage> {
   Widget build(BuildContext context) {
     final phase = ref.watch(chatSessionPhaseProvider);
     final error = ref.watch(chatSessionErrorProvider);
+    final speechState = ref.watch(speechSessionControllerProvider);
+    // Mirror partial transcripts into the composer + surface engine errors
+    // as toasts. Runs in build() so the listener stays attached for the
+    // whole widget lifetime, not just on hot reloads of the listener.
+    ref.listen<SpeechSessionState>(speechSessionControllerProvider,
+        (prev, next) {
+      if (!mounted) return;
+      if (next.partialText != prev?.partialText) {
+        controller.text = next.partialText;
+        controller.selection =
+            TextSelection.collapsed(offset: controller.text.length);
+      }
+      if (next.lastError != null && prev?.lastError != next.lastError) {
+        _showVoiceError(
+          _describeAsrError(
+            next.lastError!,
+            nativeMessage: next.lastErrorMessage,
+          ),
+        );
+      }
+    });
     return Scaffold(
       drawer: const _ChatDrawer(),
       onDrawerChanged: (opened) {
@@ -499,7 +461,7 @@ class _ChatPageState extends ConsumerState<ChatPage> {
               onSend: send,
               onToggleListening: toggleListening,
               onStop: isStreaming ? stopReply : null,
-              isListening: isListening,
+              isListening: speechState.listening,
             ),
           ],
         ),

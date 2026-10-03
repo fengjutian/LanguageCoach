@@ -206,6 +206,34 @@ void main() {
       );
     });
 
+    test('maps a persisted engine-neutral voice id to a MiniMax voice',
+        () async {
+      final adapter = _ScriptedAdapter(
+        body: {
+          'data': {'audio': _hexEncode([0xAA, 0xBB]), 'status': 2},
+          'extra_info': {'audio_format': 'mp3'},
+          'base_resp': {'status_code': 0},
+        },
+      );
+      final engine = MinimaxTtsEngine(
+        dio: Dio()..httpClientAdapter = adapter,
+        apiKeyResolver: () async => 'sk-test',
+        outputDirectory: cacheDir,
+      );
+      addTearDown(engine.dispose);
+
+      await engine.synthesize(const TtsRequest(
+        text: 'Hello there',
+        language: 'en',
+        voiceId: 'en_us_neutral',
+      ));
+
+      expect(
+        (adapter.lastBody!['voice_setting']! as Map)['voice_id'],
+        'English_expressive_narrator',
+      );
+    });
+
     test('throws TtsError(engineUnavailable) when key is missing', () async {
       final adapter = _ScriptedAdapter();
       final dio = Dio()..httpClientAdapter = adapter;

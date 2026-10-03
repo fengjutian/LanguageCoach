@@ -122,10 +122,13 @@ class AudioQueue {
   }
 
   void _onPlayerState(AudioPlaybackState next) {
-    if (next == AudioPlaybackState.completed) {
-      // Auto-advance when the player finishes a sentence.
+    if (next == AudioPlaybackState.completed && _playing) {
+      // Auto-advance when the player finishes a sentence. Guard on
+      // `_playing` so a duplicated or late completion event after the
+      // queue already drained can't re-enter _playCurrent and emit
+      // another `AudioQueueFinished`.
       _cursor += 1;
-      _playCurrent();
+      unawaited(_playCurrent());
     }
   }
 }

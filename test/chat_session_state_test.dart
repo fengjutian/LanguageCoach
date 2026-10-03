@@ -234,6 +234,7 @@ class _FakeSpeechSession extends SpeechSessionController {
         listening: listening,
         partialText: '',
         lastError: lastError,
+        lastErrorMessage: null,
         engineReady: true,
         activeProfile: null,
       );

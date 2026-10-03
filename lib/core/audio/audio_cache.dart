@@ -90,6 +90,41 @@ class AudioCacheRepository {
     );
   }
 
+  /// Remove the cached row + audio file for a single sentence. Used by
+  /// [TtsController.retrySentence] so the next play falls back to the
+  /// engine instead of replaying a stale artifact.
+  Future<void> invalidate({
+    required String conversationId,
+    required String messageId,
+    required String sentenceId,
+  }) async {
+    final rows = await _db.query(
+      'audio_files',
+      columns: const ['audio_path'],
+      where: 'conversation_id = ? AND message_id = ? AND sentence_id = ?',
+      whereArgs: [conversationId, messageId, sentenceId],
+      limit: 1,
+    );
+    if (rows.isEmpty) return;
+    final path = rows.first['audio_path'] as String?;
+    await _db.delete(
+      'audio_files',
+      where: 'conversation_id = ? AND message_id = ? AND sentence_id = ?',
+      whereArgs: [conversationId, messageId, sentenceId],
+    );
+    if (path != null) {
+      final file = File(path);
+      if (file.existsSync()) {
+        try {
+          file.deleteSync();
+        } catch (_) {
+          // best-effort — leave the file in place if it's locked; the
+          // SQLite record is gone so the next lookup will re-synthesise.
+        }
+      }
+    }
+  }
+
   Future<void> deleteForConversation(String conversationId) async {
     await _db.delete(
       'audio_files',

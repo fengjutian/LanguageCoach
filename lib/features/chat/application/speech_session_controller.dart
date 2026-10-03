@@ -11,14 +11,15 @@ import 'conversation_providers.dart';
 /// Stream the ASR engine is listening on. Backed by the Kotlin side
 /// until P1-5 swaps in a sherpa-onnx JNI library; until then the engine
 /// only emits error events when the model isn't installed.
+///
+/// Decodes only `ASR_PARTIAL` / `ASR_FINAL` / `ASR_ERROR` — lifecycle
+/// events (`ASR_START` etc.) are handled inside
+/// [SpeechSessionController] so they don't surface as fake failures.
 final asrResultStreamProvider = StreamProvider<AsrResult>((ref) {
-  return ref.watch(nativeAiBridgeProvider).eventStream.map((event) {
-    return event?.toAsrResult() ??
-        AsrFailure(
-          AsrErrorKind.unknown,
-          'unrecognised event payload: $event',
-        );
-  });
+  return ref.watch(nativeAiBridgeProvider).eventStream
+      .map((event) => event?.toAsrResult())
+      .where((result) => result != null)
+      .cast<AsrResult>();
 });
 
 /// Settings-side knob: which ASR input language to use. Distinct from
@@ -75,6 +76,7 @@ class SpeechSessionState {
     required this.listening,
     required this.partialText,
     required this.lastError,
+    required this.lastErrorMessage,
     required this.engineReady,
     required this.activeProfile,
   });
@@ -82,6 +84,10 @@ class SpeechSessionState {
   final bool listening;
   final String partialText;
   final AsrErrorKind? lastError;
+
+  /// Native detail string for [lastError]. Surfaced to the chat page so
+  /// it can format a useful toast instead of a generic "voice failed".
+  final String? lastErrorMessage;
   final bool engineReady;
   final AsrModelProfile? activeProfile;
 
@@ -89,6 +95,7 @@ class SpeechSessionState {
     bool? listening,
     String? partialText,
     AsrErrorKind? lastError,
+    String? lastErrorMessage,
     bool clearError = false,
     bool? engineReady,
     AsrModelProfile? activeProfile,
@@ -98,6 +105,8 @@ class SpeechSessionState {
       listening: listening ?? this.listening,
       partialText: partialText ?? this.partialText,
       lastError: clearError ? null : (lastError ?? this.lastError),
+      lastErrorMessage:
+          clearError ? null : (lastErrorMessage ?? this.lastErrorMessage),
       engineReady: engineReady ?? this.engineReady,
       activeProfile:
           clearActiveProfile ? null : (activeProfile ?? this.activeProfile),
@@ -108,6 +117,7 @@ class SpeechSessionState {
     listening: false,
     partialText: '',
     lastError: null,
+    lastErrorMessage: null,
     engineReady: false,
     activeProfile: null,
   );
@@ -127,12 +137,39 @@ class SpeechSessionController extends Notifier<SpeechSessionState> {
 
   @override
   SpeechSessionState build() {
-    // Riverpod owns the subscription; this fires for every event the
-    // ASR stream provider emits, including re-emits after invalidation.
-    ref.listen<AsyncValue<AsrResult>>(asrResultStreamProvider, (_, next) {
-      next.whenData(_onResult);
-    });
+    // Subscribe directly to the bridge so we own the full ASR surface
+    // (transcript frames + lifecycle events). Previously this came via
+    // `asrResultStreamProvider`, which decoded every unknown frame as
+    // an `AsrFailure` — that made `ASR_START` show up as a fake error.
+    final sub = ref.read(nativeAiBridgeProvider).eventStream.listen(_onFrame);
+    ref.onDispose(sub.cancel);
     return SpeechSessionState.initial;
+  }
+
+  void _onFrame(Object? frame) {
+    if (frame is! Map) return;
+    final type = frame['type'];
+    if (type is! String) return;
+    // Lifecycle events drive the listening flag without producing a
+    // transcript. They also close the race between
+    // `bridge.startListening()` returning and the platform actually
+    // beginning capture.
+    switch (type) {
+      case 'ASR_START':
+      case 'ASR_READY':
+      case 'ASR_SPEECH_START':
+        if (!state.listening) {
+          state = state.copyWith(listening: true);
+        }
+        return;
+      case 'ASR_CANCELLED':
+        if (state.listening) {
+          state = state.copyWith(listening: false, partialText: '');
+        }
+        return;
+    }
+    final result = frame.toAsrResult();
+    if (result != null) _onResult(result);
   }
 
   /// Resolve the language the user is speaking in. Distinct from the
@@ -265,8 +302,12 @@ class SpeechSessionController extends Notifier<SpeechSessionState> {
         state = state.copyWith(partialText: text);
       case AsrFinal(:final text):
         state = state.copyWith(partialText: text, listening: false);
-      case AsrFailure(:final kind):
-        state = state.copyWith(listening: false, lastError: kind);
+      case AsrFailure(:final kind, :final message):
+        state = state.copyWith(
+          listening: false,
+          lastError: kind,
+          lastErrorMessage: message,
+        );
     }
   }
 }

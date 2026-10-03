@@ -146,13 +146,9 @@ class MinimaxTtsEngine implements TtsEngine {
   }
 
   Map<String, Object?> _buildRequestBody(TtsRequest request) {
-    // Treat the `default` sentinel as a request for the language default
-    // voice — the user-facing picker writes real voice ids (MiniMax
-    // strings) into [AppSettings.selectedVoices], so anything else is a
-    // safe pass-through.
-    final voiceId = request.voiceId.isEmpty || request.voiceId == 'default'
-        ? _defaultVoiceFor(request.language)
-        : request.voiceId;
+    // Translate engine-neutral ids at the provider boundary. This also fixes
+    // values persisted by older app versions without requiring a migration.
+    final voiceId = _miniMaxVoiceId(request.voiceId, request.language);
     return {
       'model': _model,
       'text': request.text,
@@ -171,6 +167,22 @@ class MinimaxTtsEngine implements TtsEngine {
       },
       'language_boost': _languageBoost(request.language),
     };
+  }
+
+  /// Maps the app's engine-neutral voice ids to ids accepted by MiniMax.
+  /// Unknown ids are preserved so custom MiniMax voices keep working.
+  String _miniMaxVoiceId(String requestedVoiceId, String languageCode) {
+    if (requestedVoiceId.isEmpty ||
+        requestedVoiceId == 'default' ||
+        requestedVoiceId.endsWith('_neutral')) {
+      return _defaultVoiceFor(languageCode);
+    }
+    switch (requestedVoiceId) {
+      case 'en_us_female_warm':
+        return 'English_Graceful_Hearts';
+      default:
+        return requestedVoiceId;
+    }
   }
 
   String _defaultVoiceFor(String languageCode) {

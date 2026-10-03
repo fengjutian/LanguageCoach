@@ -166,6 +166,10 @@ class TtsController extends Notifier<TtsPlaybackState> {
   @override
   TtsPlaybackState build() {
     _queue = ref.read(audioQueueProvider);
+    // Cancel the previous subscription before replacing it, otherwise
+    // every rebuild stacks a new listener and every queue event fires
+    // N times. Same fix as model_controller (commit 135a2dc).
+    _sub?.cancel();
     _sub = _queue.events.listen(_onQueueEvent);
     ref.onDispose(() => _sub?.cancel());
     return const TtsPlaybackState();
@@ -181,33 +185,64 @@ class TtsController extends Notifier<TtsPlaybackState> {
     final sentences = splitter.split(text);
     if (sentences.isEmpty) return;
 
-    final items = <AudioQueueItem>[];
+    // Mark every sentence as generating up-front so the UI shows the
+    // spinner for the whole message, not a one-by-one reveal. Then fan
+    // the synthesis out in parallel — a 10-sentence reply no longer
+    // waits 9 rounds of network before the first clip plays.
     final stateMap =
         Map<String, SentencePlaybackState>.from(state.sentenceStates);
+    final ids = <String>[];
+    final texts = <String>[];
     for (var i = 0; i < sentences.length; i++) {
-      final sentence = sentences[i];
-      final sentenceId = 's_${messageId}_$i';
-      stateMap[sentenceId] = SentencePlaybackState.generating;
-      final result = await _synthesizeOrFetch(
-        conversationId: conversationId,
-        messageId: messageId,
-        sentenceId: sentenceId,
-        text: sentence,
-      );
-      if (result == null) {
-        stateMap[sentenceId] = SentencePlaybackState.failed;
-      } else {
-        stateMap[sentenceId] = SentencePlaybackState.ready;
-        items.add(AudioQueueItem(
-          conversationId: conversationId,
-          messageId: messageId,
-          sentenceId: sentenceId,
-          audioPath: result.audioPath,
-          duration: result.duration,
-        ));
-      }
+      final id = 's_${messageId}_$i';
+      ids.add(id);
+      texts.add(sentences[i]);
+      stateMap[id] = SentencePlaybackState.generating;
     }
     state = state.copyWith(sentenceStates: stateMap);
+
+    final outcomes = await Future.wait(<Future<
+        ({
+          TtsResult? result,
+          TtsError? error,
+          SentencePlaybackState sentenceState,
+        })>>[
+      for (var i = 0; i < ids.length; i++)
+        _synthesizeOrFetch(
+          conversationId: conversationId,
+          messageId: messageId,
+          sentenceId: ids[i],
+          text: texts[i],
+        ),
+    ]);
+
+    final items = <AudioQueueItem>[];
+    var clearError = true;
+    var lastError = state.lastError;
+    for (var i = 0; i < outcomes.length; i++) {
+      final id = ids[i];
+      final outcome = outcomes[i];
+      final result = outcome.result;
+      stateMap[id] = outcome.sentenceState;
+      if (result == null) {
+        // Keep the most recent failure. The clearError flag flips to
+        // false the moment any sentence fails so a partial success
+        // can't wipe a sibling sentence's error message.
+        if (outcome.error != null) lastError = outcome.error;
+        clearError = false;
+        continue;
+      }
+      items.add(AudioQueueItem(
+        conversationId: conversationId,
+        messageId: messageId,
+        sentenceId: id,
+        audioPath: result.audioPath,
+        duration: result.duration,
+      ));
+    }
+    state = clearError
+        ? state.copyWith(sentenceStates: stateMap, clearLastError: true)
+        : state.copyWith(sentenceStates: stateMap, lastError: lastError);
     if (items.isEmpty) return;
     await _queue.enqueue(items);
   }
@@ -224,19 +259,19 @@ class TtsController extends Notifier<TtsPlaybackState> {
     stateMap[sentenceId] = SentencePlaybackState.generating;
     state = state.copyWith(sentenceStates: stateMap);
 
-    final result = await _synthesizeOrFetch(
+    final outcome = await _synthesizeOrFetch(
       conversationId: conversationId,
       messageId: messageId,
       sentenceId: sentenceId,
       text: text,
     );
+    final result = outcome.result;
+    stateMap[sentenceId] = outcome.sentenceState;
     if (result == null) {
-      stateMap[sentenceId] = SentencePlaybackState.failed;
-      state = state.copyWith(sentenceStates: stateMap);
+      state = state.copyWith(sentenceStates: stateMap, lastError: outcome.error);
       return;
     }
-    // _synthesizeOrFetch already finalised the state to either `cached`
-    // (cache hit) or `ready` (fresh synthesis); don't overwrite it here.
+    state = state.copyWith(sentenceStates: stateMap, clearLastError: true);
     await _queue.enqueue([
       AudioQueueItem(
         conversationId: conversationId,
@@ -254,11 +289,16 @@ class TtsController extends Notifier<TtsPlaybackState> {
     required String sentenceId,
     required String text,
   }) async {
-    // Drop any cached record + force a fresh synthesis on the next play.
+    // Drop the cached row + audio file so the next lookup misses and the
+    // engine re-synthesises from scratch — without this the user kept
+    // hearing the same broken clip.
     final cache = ref.read(audioCacheRepositoryProvider);
     if (cache != null) {
-      // no per-row delete helper in the interface today; we just record over
-      // it on the next successful synthesis.
+      await cache.invalidate(
+        conversationId: conversationId,
+        messageId: messageId,
+        sentenceId: sentenceId,
+      );
     }
     state = state.copyWith(
       sentenceStates: {
@@ -274,7 +314,17 @@ class TtsController extends Notifier<TtsPlaybackState> {
     );
   }
 
-  Future<TtsResult?> _synthesizeOrFetch({
+  /// Pure synthesis + cache lookup. Returns the [TtsResult] on success,
+  /// the typed [TtsError] on failure, and the per-sentence playback
+  /// state to record; the caller folds everything into the state
+  /// atomically so concurrent invocations from [playMessage] don't
+  /// trample each other's snapshot reads.
+  Future<
+      ({
+        TtsResult? result,
+        TtsError? error,
+        SentencePlaybackState sentenceState,
+      })> _synthesizeOrFetch({
     required String conversationId,
     required String messageId,
     required String sentenceId,
@@ -298,14 +348,14 @@ class TtsController extends Notifier<TtsPlaybackState> {
         sentenceId: sentenceId,
       );
       if (cached != null && _containsAudio(File(cached.audioPath))) {
-        final map =
-            Map<String, SentencePlaybackState>.from(state.sentenceStates);
-        map[sentenceId] = SentencePlaybackState.cached;
-        state = state.copyWith(sentenceStates: map);
-        return TtsResult(
-          audioPath: cached.audioPath,
-          duration: cached.duration,
-          format: 'wav',
+        return (
+          result: TtsResult(
+            audioPath: cached.audioPath,
+            duration: cached.duration,
+            format: 'wav',
+          ),
+          error: null,
+          sentenceState: SentencePlaybackState.cached,
         );
       }
     }
@@ -327,9 +377,11 @@ class TtsController extends Notifier<TtsPlaybackState> {
           modelVersion: request.modelVersion,
         );
       }
-      // Successful synthesis clears any stale failure message.
-      state = state.copyWith(clearLastError: true);
-      return result;
+      return (
+        result: result,
+        error: null,
+        sentenceState: SentencePlaybackState.ready,
+      );
     } on TtsError catch (e) {
       // Surface the typed failure to the UI instead of swallowing it —
       // the previous version silently turned every engine error into a
@@ -343,8 +395,11 @@ class TtsController extends Notifier<TtsPlaybackState> {
         name: 'tts_controller',
         error: e,
       );
-      state = state.copyWith(lastError: e);
-      return null;
+      return (
+        result: null,
+        error: e,
+        sentenceState: SentencePlaybackState.failed,
+      );
     } catch (e, st) {
       developer.log(
         'TTS unexpected error: $e',
@@ -352,10 +407,11 @@ class TtsController extends Notifier<TtsPlaybackState> {
         error: e,
         stackTrace: st,
       );
-      state = state.copyWith(
-        lastError: TtsError(TtsErrorKind.unknown, e.toString()),
+      return (
+        result: null,
+        error: TtsError(TtsErrorKind.unknown, e.toString()),
+        sentenceState: SentencePlaybackState.failed,
       );
-      return null;
     }
   }
 
@@ -393,9 +449,13 @@ class TtsController extends Notifier<TtsPlaybackState> {
       case AudioQueueItemFailed():
         state = state.copyWith(playback: AudioPlaybackState.error);
       case AudioQueueFinished():
-        state = const TtsPlaybackState(playback: AudioPlaybackState.completed);
+        // Preserve per-sentence states (cached / ready / failed) so the
+        // UI keeps showing what's already on disk and re-plays skip the
+        // cold path. The previous `const TtsPlaybackState(...)` reset
+        // wiped the whole state map, hiding the cache.
+        state = state.copyWith(playback: AudioPlaybackState.completed);
       case AudioQueueStopped():
-        state = const TtsPlaybackState(playback: AudioPlaybackState.idle);
+        state = state.copyWith(playback: AudioPlaybackState.idle);
     }
   }
 
