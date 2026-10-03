@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 
@@ -44,7 +45,7 @@ class ApiClient {
       connectTimeout: const Duration(seconds: 10),
       receiveTimeout: const Duration(seconds: 60),
       sendTimeout: const Duration(seconds: 10),
-      headers: const {'Content-Type': 'application/json'},
+      headers: const {'Content-Type': 'application/json; charset=utf-8'},
       responseType: ResponseType.stream,
     ));
     return dio;
@@ -59,7 +60,7 @@ class ApiClient {
     return _safeSend(
       () => _dio.post(
         url,
-        data: body,
+        data: _encodeJsonBody(body),
         queryParameters: queryParameters,
         options: Options(
           headers: {'Authorization': 'Bearer $apiKey'},
@@ -81,18 +82,24 @@ class ApiClient {
     return _safeSend(
       () => _dio.post<dynamic>(
         url,
-        data: body,
+        data: _encodeJsonBody(body),
         queryParameters: queryParameters,
         options: Options(
           headers: {
             'Authorization': 'Bearer $apiKey',
             'Accept': 'text/event-stream',
+            'Content-Type': 'application/json; charset=utf-8',
           },
           responseType: ResponseType.stream,
         ),
       ),
     );
   }
+
+  /// Encode JSON ourselves so non-ASCII input is always sent as UTF-8,
+  /// independent of the platform adapter or Dio transformer configuration.
+  static Uint8List _encodeJsonBody(Object body) =>
+      Uint8List.fromList(utf8.encode(jsonEncode(body)));
 
   Future<Response<dynamic>> _safeSend(
       Future<Response<dynamic>> Function() send) async {

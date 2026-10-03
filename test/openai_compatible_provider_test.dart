@@ -17,6 +17,8 @@ class _StreamingAdapter implements HttpClientAdapter {
       'data: [DONE]\n\n';
 
   final String payload;
+  RequestOptions? lastRequest;
+  List<int> lastRequestBody = const [];
 
   @override
   Future<ResponseBody> fetch(
@@ -24,6 +26,9 @@ class _StreamingAdapter implements HttpClientAdapter {
     Stream<List<int>>? requestStream,
     Future<void>? cancelFuture,
   ) async {
+    lastRequest = options;
+    lastRequestBody = await requestStream?.expand((chunk) => chunk).toList() ??
+        const <int>[];
     return ResponseBody.fromBytes(
       utf8.encode(payload),
       200,
@@ -68,6 +73,30 @@ void main() {
     expect(events.whereType<LlmEventDelta>().single.text,
         '{"primary":"hello"}');
     expect(events.whereType<LlmEventComplete>(), hasLength(1));
+  });
+
+  test('sends Chinese input as UTF-8 JSON', () async {
+    final adapter = _StreamingAdapter();
+    final provider = _providerWithAdapter(adapter);
+
+    await provider
+        .generateStream(
+          const CoachRequest(
+            text: '你好，怎么说？😊',
+            intent: CoachIntent.expressionHelp,
+            targetLanguage: CoachLanguage.english,
+          ),
+          const <ChatMessage>[],
+        )
+        .drain<void>();
+
+    expect(
+      adapter.lastRequest?.headers[Headers.contentTypeHeader],
+      'application/json; charset=utf-8',
+    );
+    final requestJson = jsonDecode(utf8.decode(adapter.lastRequestBody)) as Map;
+    final messages = requestJson['messages'] as List;
+    expect((messages.last as Map)['content'], '你好，怎么说？😊');
   });
 
   test('routes delta.reasoning_content into LlmEventThinking', () async {

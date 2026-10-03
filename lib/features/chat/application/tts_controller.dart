@@ -179,6 +179,7 @@ class TtsController extends Notifier<TtsPlaybackState> {
     required String conversationId,
     required String messageId,
     required String text,
+    String? languageCode,
   }) async {
     if (text.trim().isEmpty) return;
     final splitter = ref.read(sentenceSplitterProvider);
@@ -213,6 +214,7 @@ class TtsController extends Notifier<TtsPlaybackState> {
           messageId: messageId,
           sentenceId: ids[i],
           text: texts[i],
+          languageCode: languageCode,
         ),
     ]);
 
@@ -252,6 +254,7 @@ class TtsController extends Notifier<TtsPlaybackState> {
     required String messageId,
     required String sentenceId,
     required String text,
+    String? languageCode,
   }) async {
     if (text.trim().isEmpty) return;
     final stateMap =
@@ -264,11 +267,13 @@ class TtsController extends Notifier<TtsPlaybackState> {
       messageId: messageId,
       sentenceId: sentenceId,
       text: text,
+      languageCode: languageCode,
     );
     final result = outcome.result;
     stateMap[sentenceId] = outcome.sentenceState;
     if (result == null) {
-      state = state.copyWith(sentenceStates: stateMap, lastError: outcome.error);
+      state =
+          state.copyWith(sentenceStates: stateMap, lastError: outcome.error);
       return;
     }
     state = state.copyWith(sentenceStates: stateMap, clearLastError: true);
@@ -288,6 +293,7 @@ class TtsController extends Notifier<TtsPlaybackState> {
     required String messageId,
     required String sentenceId,
     required String text,
+    String? languageCode,
   }) async {
     // Drop the cached row + audio file so the next lookup misses and the
     // engine re-synthesises from scratch — without this the user kept
@@ -311,6 +317,7 @@ class TtsController extends Notifier<TtsPlaybackState> {
       messageId: messageId,
       sentenceId: sentenceId,
       text: text,
+      languageCode: languageCode,
     );
   }
 
@@ -329,6 +336,7 @@ class TtsController extends Notifier<TtsPlaybackState> {
     required String messageId,
     required String sentenceId,
     required String text,
+    String? languageCode,
   }) async {
     final settings = ref.read(settingsControllerProvider);
     final engine = ref.read(ttsEngineProvider);
@@ -339,6 +347,7 @@ class TtsController extends Notifier<TtsPlaybackState> {
       text: text,
       messageId: messageId,
       sentenceId: sentenceId,
+      languageCode: languageCode,
     );
 
     if (cache != null) {
@@ -464,13 +473,19 @@ class TtsController extends Notifier<TtsPlaybackState> {
     required String text,
     required String messageId,
     required String sentenceId,
+    String? languageCode,
   }) {
-    final defaultVoice = defaultVoiceFor(settings.preferredLanguage);
-    final voiceId =
-        settings.voiceFor(settings.preferredLanguage, defaultVoice.id);
+    final language = languageCode == null
+        ? settings.preferredLanguage
+        : CoachLanguage.values.firstWhere(
+            (item) => item.code == languageCode,
+            orElse: () => settings.preferredLanguage,
+          );
+    final defaultVoice = defaultVoiceFor(language);
+    final voiceId = settings.voiceFor(language, defaultVoice.id);
     return TtsRequest(
       text: text,
-      language: settings.preferredLanguage.code,
+      language: language.code,
       voiceId: voiceId,
       speed: settings.speechSpeed,
     );

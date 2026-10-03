@@ -20,6 +20,15 @@ bool _looksLikeMarkdown(String text) {
   ).hasMatch(text);
 }
 
+bool _containsChinese(String text) =>
+    RegExp(r'[\u3400-\u4DBF\u4E00-\u9FFF]').hasMatch(text);
+
+String _languageLabel(String code) {
+  if (code.startsWith('zh')) return '中文原文';
+  if (code.startsWith('en')) return '英文表达';
+  return '目标表达';
+}
+
 /// Renders [text] as plain text most of the time, but switches to a markdown
 /// pipeline whenever the content looks like markdown. Styles inherit from the
 /// caller-supplied [style] so headings / bold / italic all keep the same base
@@ -119,6 +128,9 @@ class MessageBubble extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     if (message.role == MessageRole.user) {
       final scheme = Theme.of(context).colorScheme;
+      final sourceText = message.sourceText ?? '';
+      final sourceLanguage = _containsChinese(sourceText) ? 'zh-CN' : 'en';
+      final tts = ref.read(ttsControllerProvider.notifier);
       return Align(
         alignment: Alignment.centerRight,
         child: Padding(
@@ -141,9 +153,46 @@ class MessageBubble extends ConsumerWidget {
                         color: scheme.primary,
                         borderRadius: BorderRadius.circular(20),
                       ),
-                      child: Text(
-                        message.sourceText ?? '',
-                        style: TextStyle(color: scheme.onPrimary),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _languageLabel(sourceLanguage),
+                            style: TextStyle(
+                              color: scheme.onPrimary.withValues(alpha: 0.72),
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            sourceText,
+                            style: TextStyle(color: scheme.onPrimary),
+                          ),
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: IconButton(
+                              tooltip:
+                                  sourceLanguage == 'zh-CN' ? '朗读中文原文' : '朗读原文',
+                              visualDensity: VisualDensity.compact,
+                              constraints: const BoxConstraints(
+                                minWidth: 36,
+                                minHeight: 36,
+                              ),
+                              color: scheme.onPrimary,
+                              onPressed: () => tts.playMessage(
+                                conversationId: conversationId,
+                                messageId: message.id,
+                                text: sourceText,
+                                languageCode: sourceLanguage,
+                              ),
+                              icon: const Icon(
+                                Icons.volume_up_outlined,
+                                size: 19,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
@@ -212,13 +261,27 @@ class MessageBubble extends ConsumerWidget {
           if (response.primary.isEmpty && isStreaming)
             const _TypingDots()
           else
-            _BubbleText(
-              text: response.primary,
-              style: const TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.w700,
-                height: 1.3,
-              ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _languageLabel(response.targetLanguage),
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.primary,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 5),
+                _BubbleText(
+                  text: response.primary,
+                  style: const TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w700,
+                    height: 1.3,
+                  ),
+                ),
+              ],
             ),
           if (response.alternatives.isNotEmpty) ...[
             const SizedBox(height: 6),
@@ -235,6 +298,7 @@ class MessageBubble extends ConsumerWidget {
                   conversationId: conversationId,
                   messageId: message.id,
                   text: response.primary,
+                  languageCode: response.targetLanguage,
                 ),
                 onPrev: tts.previous,
                 onNext: tts.next,
@@ -327,12 +391,14 @@ class MessageBubble extends ConsumerWidget {
                     messageId: message.id,
                     sentenceId: sentenceId,
                     text: entry.value.text,
+                    languageCode: response.targetLanguage,
                   ),
                   onRetry: () => tts.retrySentence(
                     conversationId: conversationId,
                     messageId: message.id,
                     sentenceId: sentenceId,
                     text: entry.value.text,
+                    languageCode: response.targetLanguage,
                   ),
                 );
               },

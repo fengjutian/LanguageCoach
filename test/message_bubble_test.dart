@@ -35,8 +35,8 @@ ChatMessage _sampleMessage() => ChatMessage(
       createdAt: DateTime(2026),
       response: CoachResponse(
         intent: CoachIntent.conversation,
-        sourceLanguage: 'en',
-        targetLanguage: 'zh',
+        sourceLanguage: 'zh-CN',
+        targetLanguage: 'en',
         primary: 'It is raining today.',
         explanation: 'simple present progressive',
         sentences: const [
@@ -48,6 +48,32 @@ ChatMessage _sampleMessage() => ChatMessage(
     );
 
 void main() {
+  testWidgets('Chinese input and English answer are labelled and readable',
+      (tester) async {
+    final userMessage = ChatMessage(
+      id: 'user1',
+      role: MessageRole.user,
+      createdAt: DateTime(2026),
+      sourceText: '南京的盐水鸭非常有名。',
+    );
+
+    await tester.pumpWidget(_wrap(
+      ListView(
+        children: [
+          MessageBubble(message: userMessage, conversationId: 'c1'),
+          MessageBubble(message: _sampleMessage(), conversationId: 'c1'),
+        ],
+      ),
+    ));
+
+    expect(find.text('中文原文'), findsOneWidget);
+    expect(find.text('南京的盐水鸭非常有名。'), findsOneWidget);
+    expect(find.byTooltip('朗读中文原文'), findsOneWidget);
+    expect(find.text('英文表达'), findsOneWidget);
+    expect(find.text('It is raining today.'), findsOneWidget);
+    expect(find.byTooltip('播放整段'), findsOneWidget);
+  });
+
   testWidgets('renders assistant bubble with sentences and play buttons',
       (tester) async {
     await tester.pumpWidget(_wrap(
