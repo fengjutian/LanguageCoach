@@ -159,7 +159,7 @@ void main() {
       expect(result.bytes, audioBytes.length);
 
       // Request shape — every MiniMax T2A v2 field the engine fills.
-      expect(adapter.lastRequest?.path, 'https://api.minimax.io/v1/t2a_v2');
+      expect(adapter.lastRequest?.path, 'https://api.minimaxi.com/v1/t2a_v2');
       expect(adapter.lastHeaders?['Authorization'], 'Bearer sk-test');
       expect(adapter.lastHeaders?['Content-Type'], 'application/json');
       final body = adapter.lastBody!;

@@ -21,7 +21,11 @@ class MinimaxTtsEngine implements TtsEngine {
     required Dio dio,
     required Future<String?> Function() apiKeyResolver,
     required this.outputDirectory,
-    String baseUrl = 'https://api.minimax.io/v1',
+    // MiniMax API keys are region-bound. Language Coach's LLM endpoint uses
+    // the mainland-China platform (api.minimaxi.com), so TTS must use the
+    // matching host as well. Sending that key to api.minimax.io produces a
+    // misleading `invalid api key` after the text reply has already loaded.
+    String baseUrl = 'https://api.minimaxi.com/v1',
     String model = 'speech-2.6-hd',
     String? id,
   })  : _dio = dio,

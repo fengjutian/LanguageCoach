@@ -89,6 +89,7 @@ final miniMaxTtsApiKeyProvider = FutureProvider<String?>((ref) async {
 
 final ttsEngineProvider = Provider<TtsEngine>((ref) {
   final outputDir = ref.watch(ttsOutputDirectoryProvider);
+  final config = ref.watch(appConfigProvider);
   // Watch the cached API key. When the user has entered a MiniMax key the
   // runtime swaps the off-platform stub for a cloud-backed engine — that
   // is the path that lets the app do cloud TTS while bypassing the ~860 MB
@@ -102,6 +103,9 @@ final ttsEngineProvider = Provider<TtsEngine>((ref) {
       dio: Dio(),
       apiKeyResolver: () async => apiKey,
       outputDirectory: outputDir,
+      // Keep chat and speech on the same MiniMax region. MiniMax keys cannot
+      // be used interchangeably between api.minimaxi.com and api.minimax.io.
+      baseUrl: config.miniMax.baseUrl,
     );
   }
   // Without a cloud key, use Android's installed speech engine. The native
