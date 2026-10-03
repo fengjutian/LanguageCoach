@@ -235,6 +235,10 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, RecognitionL
     }
 
     private fun requestAudioPermissionAndStart(language: String, result: MethodChannel.Result) {
+        if (pendingPermissionResult != null) {
+            result.error("MICROPHONE_PERMISSION_PENDING", "A microphone permission request is already pending.", null)
+            return
+        }
         if (!SpeechRecognizer.isRecognitionAvailable(this)) {
             result.error("ASR_UNAVAILABLE", "Speech recognition is unavailable on this device.", null)
             return
@@ -262,6 +266,10 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, RecognitionL
         profileId: String?,
         result: MethodChannel.Result,
     ) {
+        if (pendingPermissionResult != null) {
+            result.error("MICROPHONE_PERMISSION_PENDING", "A microphone permission request is already pending.", null)
+            return
+        }
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
             PackageManager.PERMISSION_GRANTED
         ) {

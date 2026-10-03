@@ -115,35 +115,31 @@ JSON object (no prose, no markdown fences) matching this schema:
     var emittedError = false;
 
     try {
-      await for (final chunk in utf8.decoder.bind(stream)) {
-        for (final event in _splitSseEvents(chunk)) {
-          if (event.data.isEmpty) continue;
-          if (event.data == '[DONE]') {
-            break;
-          }
-          final parts = _extractDeltaParts(event.data);
-          if (parts.content != null && parts.content!.isNotEmpty) {
-            buffer.write(parts.content);
-            yield LlmEventDelta(parts.content!);
-          }
-          // Reasoning tokens arrive separately from answer tokens on
-          // thinking-enabled endpoints (DeepSeek-R1 puts the trace in
-          // `delta.reasoning_content`). We stream them as their own event so
-          // the UI can fold them away and so they never leak into `primary`.
-          if (parts.reasoning != null && parts.reasoning!.isNotEmpty) {
-            thinkingBuffer.write(parts.reasoning);
-            yield LlmEventThinking(parts.reasoning!);
-          }
-          final errMsg = _extractError(event.data);
-          if (errMsg != null) {
-            emittedError = true;
-            yield LlmEventError(LlmError(
-              LlmErrorKind.unknown,
-              errMsg,
-              httpStatus: event.status,
-            ));
-            break;
-          }
+      await for (final event in _decodeSse(stream)) {
+        if (event.data.isEmpty) continue;
+        if (event.data == '[DONE]') break;
+        final parts = _extractDeltaParts(event.data);
+        if (parts.content != null && parts.content!.isNotEmpty) {
+          buffer.write(parts.content);
+          yield LlmEventDelta(parts.content!);
+        }
+        // Reasoning tokens arrive separately from answer tokens on
+        // thinking-enabled endpoints (DeepSeek-R1 puts the trace in
+        // `delta.reasoning_content`). We stream them as their own event so
+        // the UI can fold them away and so they never leak into `primary`.
+        if (parts.reasoning != null && parts.reasoning!.isNotEmpty) {
+          thinkingBuffer.write(parts.reasoning);
+          yield LlmEventThinking(parts.reasoning!);
+        }
+        final errMsg = _extractError(event.data);
+        if (errMsg != null) {
+          emittedError = true;
+          yield LlmEventError(LlmError(
+            LlmErrorKind.unknown,
+            errMsg,
+            httpStatus: event.status,
+          ));
+          break;
         }
       }
     } on LlmError catch (e) {
@@ -182,23 +178,23 @@ JSON object (no prose, no markdown fences) matching this schema:
     };
   }
 
-  Iterable<_SseEvent> _splitSseEvents(String chunk) sync* {
-    final lines = const LineSplitter().convert(chunk);
-    String? data;
+  Stream<_SseEvent> _decodeSse(Stream<List<int>> bytes) async* {
+    final data = <String>[];
     int? status;
-    for (final line in lines) {
+    await for (final line
+        in bytes.transform(utf8.decoder).transform(const LineSplitter())) {
       if (line.startsWith('data:')) {
-        data = line.substring(5).trimLeft();
+        data.add(line.substring(5).trimLeft());
       } else if (line.startsWith('status:')) {
         status = int.tryParse(line.substring(7).trim());
-      } else if (line.isEmpty && data != null) {
-        yield _SseEvent(data, status);
-        data = null;
+      } else if (line.isEmpty && data.isNotEmpty) {
+        yield _SseEvent(data.join('\n'), status);
+        data.clear();
         status = null;
       }
     }
-    if (data != null) {
-      yield _SseEvent(data, status);
+    if (data.isNotEmpty) {
+      yield _SseEvent(data.join('\n'), status);
     }
   }
 

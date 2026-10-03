@@ -26,8 +26,22 @@ class _FakeAdapter implements HttpClientAdapter {
   final String mode;
 
   static const _defaultBody = <int>[
-    0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80,
-    0x90, 0xa0, 0xb0, 0xc0, 0xd0, 0xe0, 0xf0, 0x00,
+    0x10,
+    0x20,
+    0x30,
+    0x40,
+    0x50,
+    0x60,
+    0x70,
+    0x80,
+    0x90,
+    0xa0,
+    0xb0,
+    0xc0,
+    0xd0,
+    0xe0,
+    0xf0,
+    0x00,
   ];
 
   String? lastRangeHeader;
@@ -54,6 +68,23 @@ class _FakeAdapter implements HttpClientAdapter {
         200,
         headers: {
           Headers.contentLengthHeader: [_defaultBody.length.toString()],
+        },
+      );
+    }
+    if (mode == 'range_success') {
+      final existing = int.parse(lastRangeHeader!.split('=')[1].split('-')[0]);
+      final controller = StreamController<Uint8List>();
+      Future(() {
+        controller.add(Uint8List.fromList(_defaultBody.sublist(existing)));
+        controller.close();
+      });
+      return ResponseBody(
+        controller.stream,
+        206,
+        headers: {
+          Headers.contentLengthHeader: [
+            (_defaultBody.length - existing).toString()
+          ],
         },
       );
     }
@@ -88,8 +119,7 @@ class _FakeAdapter implements HttpClientAdapter {
   }
 }
 
-String _sha256Hex(List<int> bytes) =>
-    sha256.convert(bytes).toString();
+String _sha256Hex(List<int> bytes) => sha256.convert(bytes).toString();
 
 void main() {
   group('ModelDownloadService', () {
@@ -205,6 +235,58 @@ void main() {
       );
     });
 
+    test('rejects a second download while the same model is active', () async {
+      final adapter = _FakeAdapter(mode: 'paused');
+      final service = ModelDownloadService(
+        dio: Dio()..httpClientAdapter = adapter,
+        rootDirectory: root,
+        events: events,
+      );
+      final manifest = ModelManifest(
+        id: 'qwen3-tts-0.6B',
+        type: 'tts',
+        version: '0.6.0',
+        sizeBytes: _FakeAdapter._defaultBody.length,
+        downloadUrl: 'https://example.invalid/model',
+        sha256: 'PLACEHOLDER_SHA256',
+        artifacts: const <ModelArtifact>[],
+      );
+
+      final first = service.download(manifest);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(await service.download(manifest), isNull);
+      await service.pause(manifest.id);
+      await first;
+    });
+
+    test('resume progress uses the complete artifact size as total', () async {
+      final installPath = '${root.path}/models/qwen3-tts-0.6B/0.6.0';
+      await Directory('${root.path}/models/qwen3-tts-0.6B')
+          .create(recursive: true);
+      File('$installPath.partial')
+          .writeAsBytesSync(_FakeAdapter._defaultBody.sublist(0, 4));
+      final service = ModelDownloadService(
+        dio: Dio()..httpClientAdapter = _FakeAdapter(mode: 'range_success'),
+        rootDirectory: root,
+        events: events,
+      );
+      final manifest = ModelManifest(
+        id: 'qwen3-tts-0.6B',
+        type: 'tts',
+        version: '0.6.0',
+        sizeBytes: _FakeAdapter._defaultBody.length,
+        downloadUrl: 'https://example.invalid/model',
+        sha256: _sha256Hex(_FakeAdapter._defaultBody),
+        artifacts: const <ModelArtifact>[],
+      );
+
+      expect(await service.download(manifest), installPath);
+      await Future<void>.delayed(Duration.zero);
+      final progress = received.whereType<ModelDownloadProgress>().last;
+      expect(progress.bytesDownloaded, progress.totalBytes);
+      expect(progress.totalBytes, manifest.sizeBytes);
+    });
+
     test('checksum mismatch produces Errored(checksumMismatch)', () async {
       final adapter = _FakeAdapter();
       final dio = Dio()..httpClientAdapter = adapter;
@@ -234,7 +316,8 @@ void main() {
       );
     });
 
-    test('416 Range Unsatisfiable surfaces an Errored event and does not '
+    test(
+        '416 Range Unsatisfiable surfaces an Errored event and does not '
         'promote the partial file', () async {
       // Pre-create a partial file so the resume path is exercised — that
       // is the only configuration where 416 is a realistic server response

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -11,12 +12,13 @@ import 'package:language_coach/core/models/chat_models.dart';
 import 'package:language_coach/core/network/api_client.dart';
 
 class _StreamingAdapter implements HttpClientAdapter {
-  _StreamingAdapter([this.payload = _defaultPayload]);
+  _StreamingAdapter([this.payload = _defaultPayload, this.chunks]);
   static const String _defaultPayload =
       'data: {"choices":[{"delta":{"content":"{\\"primary\\":\\"hello\\"}"}}]}\n\n'
       'data: [DONE]\n\n';
 
   final String payload;
+  final List<List<int>>? chunks;
   RequestOptions? lastRequest;
   List<int> lastRequestBody = const [];
 
@@ -29,8 +31,11 @@ class _StreamingAdapter implements HttpClientAdapter {
     lastRequest = options;
     lastRequestBody =
         await requestStream?.expand((chunk) => chunk).toList() ?? const <int>[];
-    return ResponseBody.fromBytes(
-      utf8.encode(payload),
+    return ResponseBody(
+      Stream<Uint8List>.fromIterable(
+        (chunks ?? <List<int>>[utf8.encode(payload)])
+            .map(Uint8List.fromList),
+      ),
       200,
       headers: {
         Headers.contentTypeHeader: ['text/event-stream'],
@@ -57,6 +62,35 @@ MiniMaxProvider _providerWithAdapter(HttpClientAdapter adapter) {
 void main() {
   test('reads Dio ResponseBody as an SSE byte stream', () async {
     final provider = _providerWithAdapter(_StreamingAdapter());
+
+    final events = await provider.generateStream(
+      const CoachRequest(
+        text: 'hello',
+        intent: CoachIntent.conversation,
+        targetLanguage: CoachLanguage.english,
+      ),
+      const <ChatMessage>[],
+    ).toList();
+
+    expect(
+      events.whereType<LlmEventError>().map((event) => event.error.message),
+      isEmpty,
+    );
+    expect(
+        events.whereType<LlmEventDelta>().single.text, '{"primary":"hello"}');
+    expect(events.whereType<LlmEventComplete>(), hasLength(1));
+  });
+
+  test('parses an SSE event split across arbitrary network chunks', () async {
+    final bytes = utf8.encode(_StreamingAdapter._defaultPayload);
+    final provider = _providerWithAdapter(_StreamingAdapter(
+      _StreamingAdapter._defaultPayload,
+      <List<int>>[
+        bytes.sublist(0, 9),
+        bytes.sublist(9, 31),
+        bytes.sublist(31),
+      ],
+    ));
 
     final events = await provider.generateStream(
       const CoachRequest(

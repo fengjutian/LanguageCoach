@@ -122,7 +122,9 @@ class AudioQueue {
   }
 
   void _onPlayerState(AudioPlaybackState next) {
-    if (next == AudioPlaybackState.completed && _playing) {
+    if (next == AudioPlaybackState.completed &&
+        _playing &&
+        _player.state == AudioPlaybackState.completed) {
       // Auto-advance when the player finishes a sentence. Guard on
       // `_playing` so a duplicated or late completion event after the
       // queue already drained can't re-enter _playCurrent and emit

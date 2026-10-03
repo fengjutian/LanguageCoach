@@ -40,7 +40,7 @@ class ModelDownloadService {
   /// the [events] stream.
   Future<String?> download(ModelManifest manifest) async {
     final id = manifest.id;
-    if (_active.containsKey(id) && _active[id]!.cancelToken == null) {
+    if (_active.containsKey(id)) {
       return null; // already in flight
     }
 
@@ -122,7 +122,7 @@ class ModelDownloadService {
         final total = manifest.sizeBytes == 0
             ? (int.tryParse(response.headers.value('content-length') ?? '') ??
                 0)
-            : manifest.sizeBytes + existing;
+            : manifest.sizeBytes;
         await for (final chunk in response.data!.stream) {
           if (state.paused) {
             await closeRaf();
