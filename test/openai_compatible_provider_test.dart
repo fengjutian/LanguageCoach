@@ -27,8 +27,8 @@ class _StreamingAdapter implements HttpClientAdapter {
     Future<void>? cancelFuture,
   ) async {
     lastRequest = options;
-    lastRequestBody = await requestStream?.expand((chunk) => chunk).toList() ??
-        const <int>[];
+    lastRequestBody =
+        await requestStream?.expand((chunk) => chunk).toList() ?? const <int>[];
     return ResponseBody.fromBytes(
       utf8.encode(payload),
       200,
@@ -58,20 +58,18 @@ void main() {
   test('reads Dio ResponseBody as an SSE byte stream', () async {
     final provider = _providerWithAdapter(_StreamingAdapter());
 
-    final events = await provider
-        .generateStream(
-          const CoachRequest(
-            text: 'hello',
-            intent: CoachIntent.conversation,
-            targetLanguage: CoachLanguage.english,
-          ),
-          const <ChatMessage>[],
-        )
-        .toList();
+    final events = await provider.generateStream(
+      const CoachRequest(
+        text: 'hello',
+        intent: CoachIntent.conversation,
+        targetLanguage: CoachLanguage.english,
+      ),
+      const <ChatMessage>[],
+    ).toList();
 
     expect(events.whereType<LlmEventError>(), isEmpty);
-    expect(events.whereType<LlmEventDelta>().single.text,
-        '{"primary":"hello"}');
+    expect(
+        events.whereType<LlmEventDelta>().single.text, '{"primary":"hello"}');
     expect(events.whereType<LlmEventComplete>(), hasLength(1));
   });
 
@@ -79,16 +77,14 @@ void main() {
     final adapter = _StreamingAdapter();
     final provider = _providerWithAdapter(adapter);
 
-    await provider
-        .generateStream(
-          const CoachRequest(
-            text: '你好，怎么说？😊',
-            intent: CoachIntent.expressionHelp,
-            targetLanguage: CoachLanguage.english,
-          ),
-          const <ChatMessage>[],
-        )
-        .drain<void>();
+    await provider.generateStream(
+      const CoachRequest(
+        text: '你好，怎么说？😊',
+        intent: CoachIntent.expressionHelp,
+        targetLanguage: CoachLanguage.english,
+      ),
+      const <ChatMessage>[],
+    ).drain<void>();
 
     expect(
       adapter.lastRequest?.headers[Headers.contentTypeHeader],
@@ -102,49 +98,46 @@ void main() {
   test('routes delta.reasoning_content into LlmEventThinking', () async {
     // Simulates DeepSeek-R1 style streaming where reasoning chunks arrive
     // interleaved with the actual answer chunks.
-    const payload = 'data: {"choices":[{"delta":{"reasoning_content":"Let me think…"}}]}\n\n'
+    const payload =
+        'data: {"choices":[{"delta":{"reasoning_content":"Let me think…"}}]}\n\n'
         'data: {"choices":[{"delta":{"content":"{\\"primary\\":\\"hello\\"}"}}]}\n\n'
         'data: [DONE]\n\n';
     final provider = _providerWithAdapter(_StreamingAdapter(payload));
 
-    final events = await provider
-        .generateStream(
-          const CoachRequest(
-            text: 'hello',
-            intent: CoachIntent.conversation,
-            targetLanguage: CoachLanguage.english,
-          ),
-          const <ChatMessage>[],
-        )
-        .toList();
+    final events = await provider.generateStream(
+      const CoachRequest(
+        text: 'hello',
+        intent: CoachIntent.conversation,
+        targetLanguage: CoachLanguage.english,
+      ),
+      const <ChatMessage>[],
+    ).toList();
 
     expect(events.whereType<LlmEventThinking>().single.text, 'Let me think…');
-    expect(events.whereType<LlmEventDelta>().single.text,
-        '{"primary":"hello"}');
+    expect(
+        events.whereType<LlmEventDelta>().single.text, '{"primary":"hello"}');
     final complete = events.whereType<LlmEventComplete>().single;
     expect(complete.response.thinking, 'Let me think…');
     expect(complete.response.primary, 'hello');
   });
 
-  test('null content and null reasoning do not yield empty events',
-      () async {
+  test('null content and null reasoning do not yield empty events', () async {
     // DeepSeek emits `{content: null, reasoning_content: null}` mid-stream
     // when switching phases. Those events must be silently skipped.
-    const payload = 'data: {"choices":[{"delta":{"content":null,"reasoning_content":null}}]}\n\n'
+    const payload =
+        'data: {"choices":[{"delta":{"content":null,"reasoning_content":null}}]}\n\n'
         'data: {"choices":[{"delta":{"content":"hi"}}]}\n\n'
         'data: [DONE]\n\n';
     final provider = _providerWithAdapter(_StreamingAdapter(payload));
 
-    final events = await provider
-        .generateStream(
-          const CoachRequest(
-            text: 'hi',
-            intent: CoachIntent.conversation,
-            targetLanguage: CoachLanguage.english,
-          ),
-          const <ChatMessage>[],
-        )
-        .toList();
+    final events = await provider.generateStream(
+      const CoachRequest(
+        text: 'hi',
+        intent: CoachIntent.conversation,
+        targetLanguage: CoachLanguage.english,
+      ),
+      const <ChatMessage>[],
+    ).toList();
 
     expect(events.whereType<LlmEventDelta>().single.text, 'hi');
     expect(events.whereType<LlmEventThinking>(), isEmpty);

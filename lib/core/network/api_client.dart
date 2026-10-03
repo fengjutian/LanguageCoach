@@ -126,7 +126,8 @@ class ApiClient {
         final status = e.response?.statusCode ?? -1;
         final detail = await _responseErrorMessage(e.response?.data);
         if (status == 401) {
-          return LlmError(LlmErrorKind.unauthorized, detail ?? 'invalid api key',
+          return LlmError(
+              LlmErrorKind.unauthorized, detail ?? 'invalid api key',
               httpStatus: 401);
         }
         if (status == 403) {
