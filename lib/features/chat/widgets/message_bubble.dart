@@ -42,9 +42,12 @@ class _BubbleText extends StatelessWidget {
       strong: base.copyWith(fontWeight: FontWeight.w700),
       em: base.copyWith(fontStyle: FontStyle.italic),
       del: base.copyWith(decoration: TextDecoration.lineThrough),
-      h1: base.copyWith(fontSize: (base.fontSize ?? 14) * 1.6, fontWeight: FontWeight.w700),
-      h2: base.copyWith(fontSize: (base.fontSize ?? 14) * 1.4, fontWeight: FontWeight.w700),
-      h3: base.copyWith(fontSize: (base.fontSize ?? 14) * 1.2, fontWeight: FontWeight.w700),
+      h1: base.copyWith(
+          fontSize: (base.fontSize ?? 14) * 1.6, fontWeight: FontWeight.w700),
+      h2: base.copyWith(
+          fontSize: (base.fontSize ?? 14) * 1.4, fontWeight: FontWeight.w700),
+      h3: base.copyWith(
+          fontSize: (base.fontSize ?? 14) * 1.2, fontWeight: FontWeight.w700),
       code: base.copyWith(
         fontFamily: 'monospace',
         backgroundColor: Colors.black12,
@@ -178,11 +181,11 @@ class MessageBubble extends ConsumerWidget {
     final tts = ref.read(ttsControllerProvider.notifier);
 
     return Container(
-      margin: const EdgeInsets.symmetric(vertical: 8),
-      padding: const EdgeInsets.all(18),
+      margin: const EdgeInsets.symmetric(vertical: 6),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(18),
         border: Border.all(color: Colors.black12),
       ),
       child: Column(
@@ -224,91 +227,123 @@ class MessageBubble extends ConsumerWidget {
               style: const TextStyle(color: Colors.black54),
             ),
           ],
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              _PlaybackButton(
+                onWhole: () => tts.playMessage(
+                  conversationId: conversationId,
+                  messageId: message.id,
+                  text: response.primary,
+                ),
+                onPrev: tts.previous,
+                onNext: tts.next,
+                onStop: tts.stop,
+                state: ttsState,
+              ),
+              const Spacer(),
+              PopupMenuButton<double>(
+                tooltip: '调整语速',
+                position: PopupMenuPosition.under,
+                initialValue: settings.speechSpeed,
+                onSelected: settingsController.setSpeechSpeed,
+                itemBuilder: (context) => _kBubbleSpeedStops
+                    .map(
+                      (speed) => CheckedPopupMenuItem<double>(
+                        value: speed,
+                        checked: settings.speechSpeed == speed,
+                        child: Text('${speed}x'),
+                      ),
+                    )
+                    .toList(),
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.surfaceContainerLow,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.speed_rounded, size: 17),
+                      const SizedBox(width: 5),
+                      Text(
+                        '${settings.speechSpeed}x',
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      const Icon(Icons.arrow_drop_down_rounded, size: 18),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
           const SizedBox(height: 14),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surfaceContainerLowest,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.black12),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _PlaybackButton(
-                  onWhole: () => tts.playMessage(
-                    conversationId: conversationId,
-                    messageId: message.id,
-                    text: response.primary,
-                  ),
-                  onPrev: tts.previous,
-                  onNext: tts.next,
-                  onStop: tts.stop,
-                  state: ttsState,
-                ),
-                const SizedBox(width: 6),
-                ..._kBubbleSpeedStops.map(
-                  (speed) => Padding(
-                    padding: const EdgeInsets.only(right: 6),
-                    child: ChoiceChip(
-                      label: Text('${speed}x'),
-                      selected: settings.speechSpeed == speed,
-                      onSelected: (_) =>
-                          settingsController.setSpeechSpeed(speed),
-                      visualDensity: VisualDensity.compact,
-                    ),
-                  ),
-                ),
+                const Text('解释', style: TextStyle(fontWeight: FontWeight.w700)),
+                const SizedBox(height: 5),
+                _BubbleText(text: response.explanation),
               ],
             ),
           ),
-          const Divider(height: 28),
-          const Text('解释', style: TextStyle(fontWeight: FontWeight.w700)),
-          const SizedBox(height: 6),
-          _BubbleText(text: response.explanation),
           const SizedBox(height: 14),
           if (response.sentences.isEmpty)
             const Text('（该回复未提供逐句）', style: TextStyle(color: Colors.black45))
           else
             ...response.sentences.asMap().entries.map(
-                  (entry) {
-                    final sentenceId = 's_${message.id}_${entry.key}';
-                    final state = ttsState.sentenceStates[sentenceId] ??
-                        SentencePlaybackState.idle;
-                    // Show the engine's typed error under the failed
-                    // tile so the user can tell whether the cause is a
-                    // missing API key, a network blip, or a malformed
-                    // payload — without this the UI looked identical to
-                    // a successful but silent playback.
-                    final errorMessage = state == SentencePlaybackState.failed
-                        ? ttsState.lastError?.message
-                        : null;
-                    return _SentenceTile(
-                      index: entry.key,
-                      text: entry.value.text,
-                      conversationId: conversationId,
-                      messageId: message.id,
-                      playbackState: state,
-                      isPlaying:
-                          ttsState.currentSentenceId == sentenceId,
-                      errorMessage: errorMessage,
-                      onPlay: () => tts.playSingleSentence(
-                        conversationId: conversationId,
-                        messageId: message.id,
-                        sentenceId: sentenceId,
-                        text: entry.value.text,
-                      ),
-                      onRetry: () => tts.retrySentence(
-                        conversationId: conversationId,
-                        messageId: message.id,
-                        sentenceId: sentenceId,
-                        text: entry.value.text,
-                      ),
-                    );
-                  },
-                ),
+              (entry) {
+                final sentenceId = 's_${message.id}_${entry.key}';
+                final state = ttsState.sentenceStates[sentenceId] ??
+                    SentencePlaybackState.idle;
+                // Show the engine's typed error under the failed
+                // tile so the user can tell whether the cause is a
+                // missing API key, a network blip, or a malformed
+                // payload — without this the UI looked identical to
+                // a successful but silent playback.
+                final errorMessage = state == SentencePlaybackState.failed
+                    ? ttsState.lastError?.message
+                    : null;
+                return _SentenceTile(
+                  index: entry.key,
+                  text: entry.value.text,
+                  conversationId: conversationId,
+                  messageId: message.id,
+                  playbackState: state,
+                  isPlaying: ttsState.currentSentenceId == sentenceId,
+                  errorMessage: errorMessage,
+                  onPlay: () => tts.playSingleSentence(
+                    conversationId: conversationId,
+                    messageId: message.id,
+                    sentenceId: sentenceId,
+                    text: entry.value.text,
+                  ),
+                  onRetry: () => tts.retrySentence(
+                    conversationId: conversationId,
+                    messageId: message.id,
+                    sentenceId: sentenceId,
+                    text: entry.value.text,
+                  ),
+                );
+              },
+            ),
           if (isLast && !isStreaming) ...[
             const SizedBox(height: 10),
             _BubbleActions(
               text: response.primary,
               explanation: response.explanation,
-              sentences: response.sentences
-                  .map((s) => s.text)
-                  .toList(growable: false),
+              sentences:
+                  response.sentences.map((s) => s.text).toList(growable: false),
               onRegenerate: onRegenerate,
             ),
           ],
@@ -439,7 +474,7 @@ class _SentenceTile extends StatelessWidget {
       borderRadius: BorderRadius.circular(12),
       child: Container(
         margin: const EdgeInsets.symmetric(vertical: 2),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
         decoration: BoxDecoration(
           color: highlight
               ? scheme.primaryContainer.withValues(alpha: 0.4)
@@ -458,7 +493,7 @@ class _SentenceTile extends StatelessWidget {
               ),
               tooltip: failed ? '重试' : '播放逐句',
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: 4),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -476,7 +511,9 @@ class _SentenceTile extends StatelessWidget {
                       fontSize: 12,
                     ),
                   ),
-                  if (failed && errorMessage != null && errorMessage!.isNotEmpty)
+                  if (failed &&
+                      errorMessage != null &&
+                      errorMessage!.isNotEmpty)
                     Padding(
                       padding: const EdgeInsets.only(top: 2),
                       child: Text(
@@ -685,9 +722,9 @@ class _TypingDots extends StatefulWidget {
 
 class _TypingDotsState extends State<_TypingDots>
     with SingleTickerProviderStateMixin {
-  late final AnimationController _controller =
-      AnimationController(vsync: this, duration: const Duration(milliseconds: 900))
-        ..repeat();
+  late final AnimationController _controller = AnimationController(
+      vsync: this, duration: const Duration(milliseconds: 900))
+    ..repeat();
 
   @override
   void dispose() {
@@ -708,8 +745,8 @@ class _TypingDotsState extends State<_TypingDots>
             children: List.generate(3, (i) {
               // Stagger each dot's pulse so it reads as a wave.
               final phase = (t + i * 0.18) % 1.0;
-              final opacity = 0.35 + 0.65 * (1 - (phase - 0.5).abs() * 2)
-                  .clamp(0.0, 1.0);
+              final opacity =
+                  0.35 + 0.65 * (1 - (phase - 0.5).abs() * 2).clamp(0.0, 1.0);
               return Padding(
                 padding: EdgeInsets.only(right: i == 2 ? 0 : 6),
                 child: Container(

@@ -130,9 +130,7 @@ class _ChatPageState extends ConsumerState<ChatPage> {
         return '识别结果解析失败';
       case AsrErrorKind.unknown:
         final detail = nativeMessage?.trim();
-        return detail == null || detail.isEmpty
-            ? '语音识别失败'
-            : '语音识别失败：$detail';
+        return detail == null || detail.isEmpty ? '语音识别失败' : '语音识别失败：$detail';
     }
   }
 
@@ -412,16 +410,15 @@ class _ChatPageState extends ConsumerState<ChatPage> {
                       children: [
                         ListView.builder(
                           controller: scrollController,
-                          padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
+                          padding: const EdgeInsets.fromLTRB(12, 6, 12, 16),
                           itemCount: messages.length,
                           itemBuilder: (context, index) {
                             final message = messages[index];
                             if (message.role == MessageRole.error) {
                               return _ErrorBubble(
                                 text: message.sourceText ?? '',
-                                onRetry: _lastUserInput.isEmpty
-                                    ? null
-                                    : retryLast,
+                                onRetry:
+                                    _lastUserInput.isEmpty ? null : retryLast,
                               );
                             }
                             final isLast = index == messages.length - 1;
@@ -454,8 +451,7 @@ class _ChatPageState extends ConsumerState<ChatPage> {
               phase: phase,
               error: error,
             ),
-            if (isStreaming)
-              _StopGenerationBar(onStop: stopReply),
+            if (isStreaming) _StopGenerationBar(onStop: stopReply),
             _Composer(
               controller: controller,
               onSend: send,
@@ -543,8 +539,7 @@ class _ModelSelector extends ConsumerWidget {
                   Icon(
                     _iconFor(p),
                     size: 16,
-                    color:
-                        p == provider ? scheme.primary : Colors.black54,
+                    color: p == provider ? scheme.primary : Colors.black54,
                   ),
                   const SizedBox(width: 8),
                   Text(_labelFor(p)),
@@ -817,54 +812,62 @@ class _ComposerState extends State<_Composer> {
 
     return Material(
       color: scheme.surface,
-      elevation: 8,
+      elevation: 0,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.end,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                IconButton(
-                  onPressed: widget.onToggleListening,
-                  icon: Icon(widget.isListening
-                      ? Icons.stop_circle
-                      : Icons.mic_none),
-                  color: widget.isListening ? scheme.error : null,
-                  tooltip: widget.isListening ? '停止识别' : '语音输入',
-                ),
-                Expanded(
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxHeight: 140),
-                    child: TextField(
-                      controller: controller,
-                      minLines: 1,
-                      maxLines: 6,
-                      textInputAction: TextInputAction.send,
-                      keyboardType: TextInputType.multiline,
-                      onSubmitted: (_) => widget.onSend(),
-                      decoration: const InputDecoration(
-                        hintText: '输入你想学习的表达…',
-                        border: InputBorder.none,
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+              decoration: BoxDecoration(
+                color: scheme.surfaceContainerLow,
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: Colors.black12),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  IconButton(
+                    onPressed: widget.onToggleListening,
+                    icon: Icon(widget.isListening
+                        ? Icons.stop_circle
+                        : Icons.mic_none),
+                    color: widget.isListening ? scheme.error : null,
+                    tooltip: widget.isListening ? '停止识别' : '语音输入',
+                  ),
+                  Expanded(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxHeight: 140),
+                      child: TextField(
+                        controller: controller,
+                        minLines: 1,
+                        maxLines: 6,
+                        textInputAction: TextInputAction.send,
+                        keyboardType: TextInputType.multiline,
+                        onSubmitted: (_) => widget.onSend(),
+                        decoration: const InputDecoration(
+                          hintText: '输入你想学习的表达…',
+                          border: InputBorder.none,
+                        ),
                       ),
                     ),
                   ),
-                ),
-                if (widget.onStop != null)
-                  IconButton(
-                    onPressed: widget.onStop,
-                    icon: const Icon(Icons.stop_circle_outlined),
-                    tooltip: '停止生成',
-                  )
-                else
-                  IconButton.filled(
-                    onPressed: widget.onSend,
-                    icon: const Icon(Icons.arrow_upward_rounded),
-                    tooltip: '发送',
-                  ),
-              ],
+                  if (widget.onStop != null)
+                    IconButton(
+                      onPressed: widget.onStop,
+                      icon: const Icon(Icons.stop_circle_outlined),
+                      tooltip: '停止生成',
+                    )
+                  else
+                    IconButton.filled(
+                      onPressed: widget.onSend,
+                      icon: const Icon(Icons.arrow_upward_rounded),
+                      tooltip: '发送',
+                    ),
+                ],
+              ),
             ),
             if (showCounter)
               Padding(
@@ -938,16 +941,17 @@ class _SessionStatusStrip extends ConsumerWidget {
       // Reset the buffer on phase entry so the waveform only shows
       // samples from the active session.
       ref.listen<ChatSessionPhase>(chatSessionPhaseProvider, (prev, next) {
-        if (prev == ChatSessionPhase.recording && next != ChatSessionPhase.recording) {
+        if (prev == ChatSessionPhase.recording &&
+            next != ChatSessionPhase.recording) {
           ref.read(waveformControllerProvider.notifier).reset();
         }
       });
       return Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
         child: Row(
           children: [
-            const SessionCharacter(phase: ChatSessionPhase.recording, size: 48),
-            const SizedBox(width: 12),
+            const SessionCharacter(phase: ChatSessionPhase.recording, size: 36),
+            const SizedBox(width: 8),
             const Expanded(child: WaveformView()),
           ],
         ),
@@ -956,11 +960,11 @@ class _SessionStatusStrip extends ConsumerWidget {
     if (phase == ChatSessionPhase.processing ||
         phase == ChatSessionPhase.playing) {
       return Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
         child: Row(
           children: [
-            SessionCharacter(phase: phase, size: 48),
-            const SizedBox(width: 12),
+            SessionCharacter(phase: phase, size: 36),
+            const SizedBox(width: 8),
             Expanded(
               child: Text(
                 _labelFor(phase),
@@ -1075,7 +1079,8 @@ class _ChatDrawer extends ConsumerWidget {
                               .setLastConversationId(item.id);
                           Navigator.of(context).pop();
                         },
-                        onLongPress: () => _confirmDelete(context, ref, item.id),
+                        onLongPress: () =>
+                            _confirmDelete(context, ref, item.id),
                       );
                     },
                   );
@@ -1163,8 +1168,7 @@ class _StopGenerationBar extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 6),
-                Icon(Icons.stop_circle_outlined,
-                    size: 16, color: scheme.error),
+                Icon(Icons.stop_circle_outlined, size: 16, color: scheme.error),
                 const SizedBox(width: 4),
                 const Text(
                   '停止',
