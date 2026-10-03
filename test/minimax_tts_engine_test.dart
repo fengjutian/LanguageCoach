@@ -70,6 +70,39 @@ String _hexEncode(List<int> bytes) {
   return sb.toString();
 }
 
+/// Like [_ScriptedAdapter] but replies with a raw JSON string so the
+/// adapter can drive `Map<dynamic, dynamic>` decoding — Dart Map literals
+/// cannot be constructed with mixed key types.
+class _RawJsonAdapter implements HttpClientAdapter {
+  _RawJsonAdapter(this.body);
+
+  final String body;
+
+  @override
+  void close({bool force = false}) {}
+
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) async {
+    final controller = StreamController<Uint8List>();
+    final bytes = utf8.encode(body);
+    Future(() {
+      controller.add(Uint8List.fromList(bytes));
+      controller.close();
+    });
+    return ResponseBody(
+      controller.stream,
+      200,
+      headers: {
+        Headers.contentLengthHeader: [bytes.length.toString()],
+      },
+    );
+  }
+}
+
 void main() {
   group('MinimaxTtsEngine', () {
     late Directory tmp;
@@ -243,6 +276,88 @@ void main() {
         throwsA(
           isA<TtsError>()
               .having((e) => e.kind, 'kind', TtsErrorKind.unknown),
+        ),
+      );
+    });
+
+    test('surfaces TtsError(format) when MiniMax returns malformed hex',
+        () async {
+      final adapter = _ScriptedAdapter(
+        body: {
+          'data': {'audio': 'ffXX90zz', 'status': 2},
+          'extra_info': {'audio_format': 'mp3'},
+          'base_resp': {'status_code': 0},
+        },
+      );
+      final dio = Dio()..httpClientAdapter = adapter;
+      final engine = MinimaxTtsEngine(
+        dio: dio,
+        apiKeyResolver: () async => 'sk-test',
+        outputDirectory: cacheDir,
+      );
+      addTearDown(engine.dispose);
+
+      await expectLater(
+        engine.synthesize(const TtsRequest(text: 'x', language: 'en')),
+        throwsA(
+          isA<TtsError>()
+              .having((e) => e.kind, 'kind', TtsErrorKind.format),
+        ),
+      );
+    });
+
+    test('succeeds after the synthesis stream has been disposed', () async {
+      final adapter = _ScriptedAdapter(
+        body: {
+          'data': {'audio': _hexEncode([0xAA, 0xBB]), 'status': 2},
+          'extra_info': {'audio_format': 'mp3'},
+          'base_resp': {'status_code': 0},
+        },
+      );
+      final dio = Dio()..httpClientAdapter = adapter;
+      final engine = MinimaxTtsEngine(
+        dio: dio,
+        apiKeyResolver: () async => 'sk-test',
+        outputDirectory: cacheDir,
+      );
+
+      // Provider rebuilds / cancellations tear down the synthesis stream
+      // before the next call lands. The next synthesize must not raise
+      // `Bad state: Cannot add new events after calling close`.
+      await engine.dispose();
+
+      final result = await engine.synthesize(
+        const TtsRequest(text: 'post-dispose', language: 'en'),
+      );
+      expect(result.audioPath.endsWith('.mp3'), isTrue);
+      expect(File(result.audioPath).existsSync(), isTrue);
+    });
+
+    test('surfaces TtsError(format) when the JSON body has a nested non-map '
+        'where a map is expected', () async {
+      // Hand-build a raw JSON body where `extra_info` is a String instead
+      // of a Map — Dart jsonDecode happily returns a Map<dynamic, dynamic>
+      // with a String value where the engine expects a nested map. The
+      // cast walk must convert that to a typed TtsError instead of
+      // letting the TypeError escape to the TTS pipeline.
+      final adapter = _RawJsonAdapter(
+        '{"data":{"audio":"deadbeef","status":2},'
+        '"extra_info":[1,2,3],'
+        '"base_resp":{"status_code":0}}',
+      );
+      final dio = Dio()..httpClientAdapter = adapter;
+      final engine = MinimaxTtsEngine(
+        dio: dio,
+        apiKeyResolver: () async => 'sk-test',
+        outputDirectory: cacheDir,
+      );
+      addTearDown(engine.dispose);
+
+      await expectLater(
+        engine.synthesize(const TtsRequest(text: 'x', language: 'en')),
+        throwsA(
+          isA<TtsError>()
+              .having((e) => e.kind, 'kind', TtsErrorKind.format),
         ),
       );
     });

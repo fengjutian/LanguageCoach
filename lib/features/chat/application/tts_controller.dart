@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:developer' as developer;
 import 'dart:io';
 
 import 'package:dio/dio.dart';
@@ -27,6 +28,7 @@ class TtsPlaybackState {
     this.playback = AudioPlaybackState.idle,
     this.queueLength = 0,
     this.sentenceStates = const <String, SentencePlaybackState>{},
+    this.lastError,
   });
 
   final String? currentSentenceId;
@@ -34,12 +36,21 @@ class TtsPlaybackState {
   final int queueLength;
   final Map<String, SentencePlaybackState> sentenceStates;
 
+  /// Most recent synthesis error surfaced to the UI. Populated when
+  /// the active engine throws [TtsError] (network, format, missing key,
+  /// upstream status_code != 0). Cleared once the user retries — a stale
+  /// message would otherwise stay attached to a sentence that has since
+  /// started a fresh synthesis.
+  final TtsError? lastError;
+
   TtsPlaybackState copyWith({
     String? currentSentenceId,
     AudioPlaybackState? playback,
     int? queueLength,
     Map<String, SentencePlaybackState>? sentenceStates,
     bool clearCurrentSentence = false,
+    TtsError? lastError,
+    bool clearLastError = false,
   }) {
     return TtsPlaybackState(
       currentSentenceId: clearCurrentSentence
@@ -48,6 +59,7 @@ class TtsPlaybackState {
       playback: playback ?? this.playback,
       queueLength: queueLength ?? this.queueLength,
       sentenceStates: sentenceStates ?? this.sentenceStates,
+      lastError: clearLastError ? null : (lastError ?? this.lastError),
     );
   }
 }
@@ -303,10 +315,34 @@ class TtsController extends Notifier<TtsPlaybackState> {
           modelVersion: request.modelVersion,
         );
       }
+      // Successful synthesis clears any stale failure message.
+      state = state.copyWith(clearLastError: true);
       return result;
-    } on TtsError {
+    } on TtsError catch (e) {
+      // Surface the typed failure to the UI instead of swallowing it —
+      // the previous version silently turned every engine error into a
+      // blank "no sound" UX with no way to tell whether the cause was
+      // a missing key, a network blip, or a malformed payload. Use
+      // [developer.log] so the message reaches `adb logcat` on top of
+      // any UI surface, which is essential when the only feedback is a
+      // silent failure.
+      developer.log(
+        'TTS synthesis failed: $e',
+        name: 'tts_controller',
+        error: e,
+      );
+      state = state.copyWith(lastError: e);
       return null;
-    } catch (_) {
+    } catch (e, st) {
+      developer.log(
+        'TTS unexpected error: $e',
+        name: 'tts_controller',
+        error: e,
+        stackTrace: st,
+      );
+      state = state.copyWith(
+        lastError: TtsError(TtsErrorKind.unknown, e.toString()),
+      );
       return null;
     }
   }

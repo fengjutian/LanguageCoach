@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/security/secure_key_store.dart';
 import '../../chat/application/conversation_providers.dart';
+import '../../chat/application/tts_controller.dart';
 
 /// State holds masked previews (last 4 chars + dots) — the full key never
 /// lives in this notifier. `null` means "not configured".
@@ -19,11 +20,21 @@ class ApiKeysController extends AsyncNotifier<Map<ApiKeySlot, String?>> {
 
   Future<void> write(ApiKeySlot slot, String value) async {
     await ref.read(secureKeyStoreProvider).write(slot, value);
+    // The TTS engine selector watches the MiniMax API key as a
+    // FutureProvider — invalidate it so the next read picks up the
+    // freshly-written key instead of the cached value the selector
+    // captured on first build.
+    if (slot == ApiKeySlot.miniMax) {
+      ref.invalidate(miniMaxTtsApiKeyProvider);
+    }
     state = AsyncValue.data(await _readAll());
   }
 
   Future<void> delete(ApiKeySlot slot) async {
     await ref.read(secureKeyStoreProvider).delete(slot);
+    if (slot == ApiKeySlot.miniMax) {
+      ref.invalidate(miniMaxTtsApiKeyProvider);
+    }
     state = AsyncValue.data(await _readAll());
   }
 

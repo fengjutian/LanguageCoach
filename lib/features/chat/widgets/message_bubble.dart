@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -79,28 +80,93 @@ class MessageBubble extends ConsumerWidget {
   const MessageBubble({
     required this.message,
     required this.conversationId,
+    this.isLast = false,
+    this.isStreaming = false,
+    this.onRegenerate,
     super.key,
   });
 
   final ChatMessage message;
   final String conversationId;
 
+  /// True for the bottom-most bubble — used to gate the trailing copy /
+  /// regenerate action bar so only the most recent reply shows quick
+  /// actions (matches ChatGPT / Doubao behavior where quick actions live
+  /// under the latest reply).
+  final bool isLast;
+
+  /// True while the engine is still emitting tokens for the assistant
+  /// reply. Quick actions hide during streaming; they fade in once the
+  /// stream settles to avoid visual churn.
+  final bool isStreaming;
+
+  /// Triggered when the user taps "重新生成". `null` disables the button.
+  final VoidCallback? onRegenerate;
+
+  /// Short HH:MM stamp rendered under each bubble. Cheap to format inline
+  /// because `createdAt` only goes through `DateFormat` once per rebuild.
+  String _stamp(DateTime ts) {
+    final l = ts.toLocal();
+    final hh = l.hour.toString().padLeft(2, '0');
+    final mm = l.minute.toString().padLeft(2, '0');
+    return '$hh:$mm';
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     if (message.role == MessageRole.user) {
+      final scheme = Theme.of(context).colorScheme;
       return Align(
         alignment: Alignment.centerRight,
-        child: Container(
-          margin: const EdgeInsets.symmetric(vertical: 6),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          constraints: const BoxConstraints(maxWidth: 330),
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.primary,
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: Text(
-            message.sourceText ?? '',
-            style: TextStyle(color: Theme.of(context).colorScheme.onPrimary),
+        child: Padding(
+          padding: const EdgeInsets.only(left: 48),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Flexible(
+                    child: Container(
+                      margin: const EdgeInsets.symmetric(vertical: 6),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 12,
+                      ),
+                      decoration: BoxDecoration(
+                        color: scheme.primary,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        message.sourceText ?? '',
+                        style: TextStyle(color: scheme.onPrimary),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  CircleAvatar(
+                    radius: 14,
+                    backgroundColor: scheme.primaryContainer,
+                    child: Icon(
+                      Icons.person_outline,
+                      size: 16,
+                      color: scheme.onPrimaryContainer,
+                    ),
+                  ),
+                ],
+              ),
+              Padding(
+                padding: const EdgeInsets.only(right: 4, top: 2, bottom: 4),
+                child: Text(
+                  _stamp(message.createdAt),
+                  style: const TextStyle(
+                    fontSize: 10,
+                    color: Colors.black45,
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       );
@@ -188,30 +254,53 @@ class MessageBubble extends ConsumerWidget {
             const Text('（该回复未提供逐句）', style: TextStyle(color: Colors.black45))
           else
             ...response.sentences.asMap().entries.map(
-                  (entry) => _SentenceTile(
-                    index: entry.key,
-                    text: entry.value.text,
-                    conversationId: conversationId,
-                    messageId: message.id,
-                    playbackState: ttsState
-                            .sentenceStates['s_${message.id}_${entry.key}'] ??
-                        SentencePlaybackState.idle,
-                    isPlaying: ttsState.currentSentenceId ==
-                        's_${message.id}_${entry.key}',
-                    onPlay: () => tts.playSingleSentence(
+                  (entry) {
+                    final sentenceId = 's_${message.id}_${entry.key}';
+                    final state = ttsState.sentenceStates[sentenceId] ??
+                        SentencePlaybackState.idle;
+                    // Show the engine's typed error under the failed
+                    // tile so the user can tell whether the cause is a
+                    // missing API key, a network blip, or a malformed
+                    // payload — without this the UI looked identical to
+                    // a successful but silent playback.
+                    final errorMessage = state == SentencePlaybackState.failed
+                        ? ttsState.lastError?.message
+                        : null;
+                    return _SentenceTile(
+                      index: entry.key,
+                      text: entry.value.text,
                       conversationId: conversationId,
                       messageId: message.id,
-                      sentenceId: 's_${message.id}_${entry.key}',
-                      text: entry.value.text,
-                    ),
-                    onRetry: () => tts.retrySentence(
-                      conversationId: conversationId,
-                      messageId: message.id,
-                      sentenceId: 's_${message.id}_${entry.key}',
-                      text: entry.value.text,
-                    ),
-                  ),
+                      playbackState: state,
+                      isPlaying:
+                          ttsState.currentSentenceId == sentenceId,
+                      errorMessage: errorMessage,
+                      onPlay: () => tts.playSingleSentence(
+                        conversationId: conversationId,
+                        messageId: message.id,
+                        sentenceId: sentenceId,
+                        text: entry.value.text,
+                      ),
+                      onRetry: () => tts.retrySentence(
+                        conversationId: conversationId,
+                        messageId: message.id,
+                        sentenceId: sentenceId,
+                        text: entry.value.text,
+                      ),
+                    );
+                  },
                 ),
+          if (isLast && !isStreaming) ...[
+            const SizedBox(height: 10),
+            _BubbleActions(
+              text: response.primary,
+              explanation: response.explanation,
+              sentences: response.sentences
+                  .map((s) => s.text)
+                  .toList(growable: false),
+              onRegenerate: onRegenerate,
+            ),
+          ],
         ],
       ),
     );
@@ -284,6 +373,7 @@ class _SentenceTile extends StatelessWidget {
     required this.isPlaying,
     required this.onPlay,
     required this.onRetry,
+    this.errorMessage,
   });
 
   final int index;
@@ -294,6 +384,11 @@ class _SentenceTile extends StatelessWidget {
   final bool isPlaying;
   final VoidCallback onPlay;
   final VoidCallback onRetry;
+
+  /// When [playbackState] is [SentencePlaybackState.failed], this is
+  /// the engine's typed error message so the user can tell a missing
+  /// API key from a network blip instead of staring at a silent icon.
+  final String? errorMessage;
 
   IconData _iconForState() {
     if (isPlaying) return Icons.graphic_eq;
@@ -360,6 +455,19 @@ class _SentenceTile extends StatelessWidget {
                       fontSize: 12,
                     ),
                   ),
+                  if (failed && errorMessage != null && errorMessage!.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(
+                        errorMessage!,
+                        style: TextStyle(
+                          color: scheme.error,
+                          fontSize: 11,
+                        ),
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -440,6 +548,104 @@ class _ThinkingExpansionState extends State<_ThinkingExpansion> {
             ),
           ],
         ],
+      ),
+    );
+  }
+}
+
+/// Quick-action bar at the bottom of the latest assistant bubble. Mirrors
+/// ChatGPT / Doubao / Claude: copy the full answer, or rerun the same
+/// request. The bar is hidden on intermediate bubbles and during streaming
+/// — both of those states are too volatile to commit to a stable
+/// regenerate target.
+class _BubbleActions extends StatelessWidget {
+  const _BubbleActions({
+    required this.text,
+    required this.explanation,
+    required this.sentences,
+    required this.onRegenerate,
+  });
+
+  final String text;
+  final String explanation;
+  final List<String> sentences;
+  final VoidCallback? onRegenerate;
+
+  String _composeClipboardPayload() {
+    final buf = StringBuffer()..writeln(text);
+    if (explanation.isNotEmpty) {
+      buf
+        ..writeln()
+        ..writeln('— 解释 —')
+        ..writeln(explanation);
+    }
+    if (sentences.isNotEmpty) {
+      buf
+        ..writeln()
+        ..writeln('— 逐句 —');
+      for (var i = 0; i < sentences.length; i++) {
+        buf.writeln('${i + 1}. ${sentences[i]}');
+      }
+    }
+    return buf.toString().trimRight();
+  }
+
+  Future<void> _copy(BuildContext context) async {
+    await Clipboard.setData(ClipboardData(text: _composeClipboardPayload()));
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('已复制回答'),
+        duration: Duration(milliseconds: 1200),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _BubbleIconAction(
+          tooltip: '复制回答',
+          icon: Icons.content_copy_outlined,
+          onTap: () => _copy(context),
+        ),
+        if (onRegenerate != null) ...[
+          const SizedBox(width: 4),
+          _BubbleIconAction(
+            tooltip: '重新生成',
+            icon: Icons.refresh_rounded,
+            onTap: onRegenerate!,
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _BubbleIconAction extends StatelessWidget {
+  const _BubbleIconAction({
+    required this.tooltip,
+    required this.icon,
+    required this.onTap,
+  });
+
+  final String tooltip;
+  final IconData icon;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.all(6),
+          child: Icon(icon, size: 18, color: Colors.black54),
+        ),
       ),
     );
   }

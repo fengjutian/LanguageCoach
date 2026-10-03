@@ -76,11 +76,21 @@ class MinimaxTtsEngine implements TtsEngine {
             'MiniMax returned a non-object body',
           );
         }
-        data = Map<String, Object?>.from(decoded);
+        // Cast through `dynamic` so a Map with non-String keys (or a
+        // nested Map<int,Object?>) surfaces as a typed TtsError instead
+        // of an uncaught TypeError bubbling up to the TTS pipeline.
+        data = _castJsonMap(decoded);
+      } on TtsError {
+        rethrow;
       } on FormatException catch (e) {
         throw TtsError(
           TtsErrorKind.format,
           'MiniMax returned malformed JSON: ${e.message}',
+        );
+      } on TypeError catch (e) {
+        throw TtsError(
+          TtsErrorKind.format,
+          'MiniMax returned an unexpected payload shape: ${e.toString()}',
         );
       }
       final baseResp = data['base_resp'];
@@ -117,7 +127,14 @@ class MinimaxTtsEngine implements TtsEngine {
         format: audioFormat,
         duration: Duration(milliseconds: audioLengthMs),
       );
-      _controller.add(TtsSynthesisComplete(result));
+      // The synthesis stream might be torn down between fetch and write
+      // (provider rebuild, user cancellation) — drop the event instead
+      // of letting `add` raise `Bad state: Cannot add new events after
+      // calling close`. The TtsResult still goes back to the caller, so
+      // the audio file is usable.
+      if (!_controller.isClosed) {
+        _controller.add(TtsSynthesisComplete(result));
+      }
       return result;
     } on DioException catch (e) {
       throw TtsError(_mapDioKind(e), e.message ?? 'MiniMax network failure');
@@ -201,12 +218,54 @@ class MinimaxTtsEngine implements TtsEngine {
   }
 
   Uint8List _hexDecode(String hex) {
-    final length = hex.length;
-    final out = Uint8List(length ~/ 2);
-    for (var i = 0; i < length; i += 2) {
-      out[i ~/ 2] = int.parse(hex.substring(i, i + 2), radix: 16);
+    // MiniMax occasionally returns a truncated or otherwise malformed hex
+    // payload (e.g. a partial frame when the connection is reset). Wrap
+    // the parse so the engine surfaces a typed [TtsError] instead of an
+    // uncaught FormatException / RangeError bubbling up to the UI.
+    try {
+      final length = hex.length;
+      final out = Uint8List(length ~/ 2);
+      for (var i = 0; i + 1 < length; i += 2) {
+        out[i ~/ 2] = int.parse(hex.substring(i, i + 2), radix: 16);
+      }
+      return out;
+    } on FormatException catch (e) {
+      throw TtsError(
+        TtsErrorKind.format,
+        'MiniMax returned malformed hex audio (${e.message})',
+      );
+    } on RangeError catch (e) {
+      throw TtsError(
+        TtsErrorKind.format,
+        'MiniMax returned truncated hex audio (${e.message})',
+      );
     }
-    return out;
+  }
+
+  /// Walk a decoded JSON map (which Dart parses as `Map<dynamic, dynamic>`)
+  /// and rebuild it as `Map<String, Object?>`. Nested maps are cast
+  /// recursively; non-String keys or values that cannot be coerced raise
+  /// a [TypeError] that the call site maps to [TtsErrorKind.format].
+  Map<String, Object?> _castJsonMap(dynamic value) {
+    if (value is! Map) {
+      throw TypeError();
+    }
+    final result = <String, Object?>{};
+    value.forEach((key, v) {
+      if (key is! String) {
+        throw TypeError();
+      }
+      if (v == null) {
+        result[key] = null;
+      } else if (v is Map) {
+        result[key] = _castJsonMap(v);
+      } else if (v is num || v is String || v is bool) {
+        result[key] = v;
+      } else {
+        throw TypeError();
+      }
+    });
+    return result;
   }
 
   TtsErrorKind _mapDioKind(DioException e) {

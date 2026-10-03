@@ -132,4 +132,52 @@ void main() {
     expect(find.byType(MarkdownBody), findsNothing);
     expect(find.text('It is raining today.'), findsOneWidget);
   });
+
+  testWidgets('last assistant bubble exposes copy + regenerate actions',
+      (tester) async {
+    var regenerated = 0;
+    await tester.pumpWidget(_wrap(
+      MessageBubble(
+        message: _sampleMessage(),
+        conversationId: 'c1',
+        isLast: true,
+        isStreaming: false,
+        onRegenerate: () => regenerated++,
+      ),
+    ));
+
+    expect(find.byTooltip('复制回答'), findsOneWidget);
+    expect(find.byTooltip('重新生成'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('重新生成'));
+    expect(regenerated, 1);
+  });
+
+  testWidgets('intermediate bubbles hide the action bar', (tester) async {
+    await tester.pumpWidget(_wrap(
+      MessageBubble(
+        message: _sampleMessage(),
+        conversationId: 'c1',
+        isLast: false,
+        onRegenerate: () {},
+      ),
+    ));
+    expect(find.byTooltip('复制回答'), findsNothing);
+    expect(find.byTooltip('重新生成'), findsNothing);
+  });
+
+  testWidgets('streaming hides the action bar until the reply settles',
+      (tester) async {
+    await tester.pumpWidget(_wrap(
+      MessageBubble(
+        message: _sampleMessage(),
+        conversationId: 'c1',
+        isLast: true,
+        isStreaming: true,
+        onRegenerate: () {},
+      ),
+    ));
+    expect(find.byTooltip('复制回答'), findsNothing);
+    expect(find.byTooltip('重新生成'), findsNothing);
+  });
 }
