@@ -182,7 +182,7 @@ JSON object (no prose, no markdown fences) matching this schema:
     final data = <String>[];
     int? status;
     await for (final line
-        in bytes.transform(utf8.decoder).transform(const LineSplitter())) {
+        in utf8.decoder.bind(bytes).transform(const LineSplitter())) {
       if (line.startsWith('data:')) {
         data.add(line.substring(5).trimLeft());
       } else if (line.startsWith('status:')) {
