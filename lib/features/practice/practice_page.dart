@@ -5,6 +5,7 @@ import '../../core/models/app_settings.dart';
 import '../settings/application/settings_controller.dart';
 import 'application/practice_controller.dart';
 import 'repeat_practice_page.dart';
+import 'roleplay_page.dart';
 import 'shadowing_page.dart';
 
 enum PracticeMode { repeat, shadowing, correction }
@@ -89,6 +90,15 @@ class PracticePage extends ConsumerWidget {
             description: '提交自己的句子，获取纠错、原因和更自然的表达。',
             actionLabel: '开始纠错',
             onTap: () => onStart(_prompt(PracticeMode.correction, language)),
+          ),
+          _PracticeCard(
+            icon: Icons.theater_comedy_outlined,
+            title: 'Roleplay 情景对话',
+            description: '选择角色、场景和任务目标，在独立对话中完成挑战并获取结束总结。',
+            actionLabel: '选择场景',
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => const RoleplayPage()),
+            ),
           ),
         ],
       ),

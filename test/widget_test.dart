@@ -15,6 +15,7 @@ import 'package:language_coach/features/chat/application/tts_controller.dart';
 import 'package:language_coach/features/home/home_page.dart';
 import 'package:language_coach/features/practice/practice_page.dart';
 import 'package:language_coach/features/practice/repeat_practice_page.dart';
+import 'package:language_coach/features/practice/roleplay_page.dart';
 import 'package:language_coach/features/practice/shadowing_page.dart';
 import 'package:language_coach/features/settings/application/model_controller.dart';
 import 'package:language_coach/features/settings/application/settings_controller.dart';
@@ -170,5 +171,15 @@ void main() {
     expect(find.byType(ShadowingPage), findsOneWidget);
     expect(find.text('0.75×'), findsOneWidget);
     expect(find.text('不循环 · 1.0×'), findsOneWidget);
+
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    await tester.drag(find.byType(ListView).last, const Offset(0, -500));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('选择场景'));
+    await tester.pumpAndSettle();
+    expect(find.byType(RoleplayPage), findsOneWidget);
+    expect(find.text('酒店入住'), findsWidgets);
+    expect(find.text('进入场景'), findsOneWidget);
   });
 }
