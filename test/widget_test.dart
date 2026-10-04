@@ -14,6 +14,7 @@ import 'package:language_coach/core/repositories/in_memory_repositories.dart';
 import 'package:language_coach/features/chat/application/tts_controller.dart';
 import 'package:language_coach/features/home/home_page.dart';
 import 'package:language_coach/features/practice/practice_page.dart';
+import 'package:language_coach/features/practice/repeat_practice_page.dart';
 import 'package:language_coach/features/settings/application/model_controller.dart';
 import 'package:language_coach/features/settings/application/settings_controller.dart';
 import 'package:language_coach/features/settings/settings_page.dart';
@@ -128,7 +129,7 @@ void main() {
     expect(find.text('设置'), findsOneWidget);
   });
 
-  testWidgets('Practice entry puts a contextual prompt in chat composer',
+  testWidgets('Practice entry opens the dedicated repeat flow',
       (tester) async {
     final tmp = Directory.systemTemp.createTempSync('practice_test_root_');
     await tester.pumpWidget(
@@ -155,7 +156,9 @@ void main() {
 
     await tester.tap(find.text('开始跟读'));
     await tester.pumpAndSettle();
-    final field = tester.widget<TextField>(find.byType(TextField));
-    expect(field.controller?.text, contains('3 句适合跟读的英语日常表达'));
+    expect(find.byType(RepeatPracticePage), findsOneWidget);
+    expect(find.text('1. 播放原句'), findsOneWidget);
+    expect(find.text('2. 开始跟读'), findsOneWidget);
+    expect(find.text('音素'), findsNothing);
   });
 }

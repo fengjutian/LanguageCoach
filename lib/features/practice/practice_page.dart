@@ -26,10 +26,36 @@ class PracticePage extends ConsumerWidget {
           Text('当前目标语言：${_languageName(language)}'),
           const SizedBox(height: 16),
           attempts.when(
-            data: (items) => _PracticeSummary(
-              count: items.length,
-              average: items.isEmpty ? null : items.map((e) => e.score.overall).reduce((a, b) => a + b) ~/ items.length,
-              latest: items.isEmpty ? null : items.first.score.overall,
+            data: (items) => Column(
+              children: [
+                _PracticeSummary(
+                  count: items.length,
+                  average: items.isEmpty
+                      ? null
+                      : items
+                              .map((e) => e.score.overall)
+                              .reduce((a, b) => a + b) ~/
+                          items.length,
+                  latest: items.isEmpty ? null : items.first.score.overall,
+                ),
+                if (items.isNotEmpty)
+                  ExpansionTile(
+                    title: const Text('最近练习'),
+                    subtitle: const Text('查看成绩与复习原句'),
+                    children: items.take(5).map((item) {
+                      return ListTile(
+                        leading:
+                            CircleAvatar(child: Text('${item.score.overall}')),
+                        title: Text(item.referenceText,
+                            maxLines: 1, overflow: TextOverflow.ellipsis),
+                        subtitle: Text(
+                          '${item.createdAt.month}-${item.createdAt.day}  '
+                          '准确 ${item.score.accuracy} · 流利 ${item.score.fluency}',
+                        ),
+                      );
+                    }).toList(),
+                  ),
+              ],
             ),
             loading: () => const LinearProgressIndicator(),
             error: (_, __) => const SizedBox.shrink(),
