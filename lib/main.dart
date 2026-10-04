@@ -12,6 +12,8 @@ import 'core/database/app_database_provider.dart';
 import 'core/models/app_settings.dart';
 import 'core/repositories/sqlite_settings_repository.dart';
 import 'features/chat/application/tts_controller.dart';
+import 'features/practice/application/practice_controller.dart';
+import 'features/practice/data/practice_repository.dart';
 import 'features/settings/application/settings_controller.dart';
 
 Future<void> main() async {
@@ -40,6 +42,7 @@ Future<void> main() async {
       audioCacheRepositoryProvider.overrideWithValue(
         AudioCacheRepository(db, rootDirectory: docsDir),
       ),
+      practiceRepositoryProvider.overrideWithValue(SqlitePracticeRepository(db)),
     ],
     child: const LanguageCoachApp(),
   ));

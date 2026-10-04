@@ -9,7 +9,7 @@ import 'package:sqflite/sqflite.dart';
 class AppDatabase {
   AppDatabase._(this._db);
 
-  static const int schemaVersion = 1;
+  static const int schemaVersion = 2;
 
   final Database _db;
   Database get db => _db;
@@ -154,5 +154,24 @@ final List<MigrationStep> migrations = <MigrationStep>[
       PRIMARY KEY (conversation_id, message_id, sentence_id)
     )
     ''',
+  ]),
+  MigrationStep(2, <String>[
+    '''
+    CREATE TABLE practice_attempts (
+      id TEXT PRIMARY KEY,
+      mode TEXT NOT NULL,
+      language TEXT NOT NULL,
+      reference_text TEXT NOT NULL,
+      transcript TEXT NOT NULL,
+      overall_score INTEGER NOT NULL,
+      phoneme_score INTEGER NOT NULL,
+      accuracy_score INTEGER NOT NULL,
+      fluency_score INTEGER NOT NULL,
+      completeness_score INTEGER NOT NULL,
+      duration_ms INTEGER,
+      created_at INTEGER NOT NULL
+    )
+    ''',
+    'CREATE INDEX idx_practice_attempts_created ON practice_attempts(created_at DESC)',
   ]),
 ];
