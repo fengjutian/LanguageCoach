@@ -3,6 +3,7 @@ package com.languagecoach.language_coach
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.MediaRecorder
 import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
@@ -24,6 +25,7 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, RecognitionL
     private var pendingLanguage: String = "en-US"
     private var pendingAsrProfileId: String? = null
     private var pendingLocalCapture = false
+    private var pendingPracticeRecording = false
     private var ttsService: TtsService? = null
     private var systemTtsService: SystemTtsService? = null
     private var asrService: AsrService? = null
@@ -32,6 +34,8 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, RecognitionL
     // `onDestroy` can unload them instead of guessing the manifest id.
     private val loadedLlmModels = mutableSetOf<String>()
     private var loadedTtsModelId: String? = null
+    private var practiceRecorder: MediaRecorder? = null
+    private var practiceRecordingFile: File? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -85,6 +89,14 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, RecognitionL
                     }
                     "isSpeechRecognitionAvailable" ->
                         result.success(SpeechRecognizer.isRecognitionAvailable(this))
+                    "startPracticeRecording" ->
+                        startPracticeRecording(result)
+                    "stopPracticeRecording" ->
+                        result.success(stopPracticeRecording(keepFile = true))
+                    "cancelPracticeRecording" -> {
+                        stopPracticeRecording(keepFile = false)
+                        result.success(null)
+                    }
                     "loadLlmModel" -> {
                         val modelId = call.argument<String>("modelId") ?: ""
                         val manifestJson = call.argument<String>("manifestJson")
@@ -288,6 +300,72 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, RecognitionL
         )
     }
 
+    private fun startPracticeRecording(result: MethodChannel.Result) {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            if (pendingPermissionResult != null) {
+                result.error("MICROPHONE_PERMISSION_PENDING", "A microphone permission request is already pending", null)
+                return
+            }
+            pendingPracticeRecording = true
+            pendingPermissionResult = result
+            ActivityCompat.requestPermissions(
+                this,
+                arrayOf(Manifest.permission.RECORD_AUDIO),
+                AUDIO_PERMISSION_REQUEST,
+            )
+            return
+        }
+        if (practiceRecorder != null) {
+            result.error("RECORDER_BUSY", "A practice recording is already active", null)
+            return
+        }
+        try {
+            val output = File(filesDir, "practice_recordings/shadow-${System.currentTimeMillis()}.m4a")
+            output.parentFile?.mkdirs()
+            @Suppress("DEPRECATION")
+            val recorder = MediaRecorder().apply {
+                setAudioSource(MediaRecorder.AudioSource.MIC)
+                setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+                setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+                setAudioSamplingRate(44_100)
+                setAudioEncodingBitRate(96_000)
+                setOutputFile(output.absolutePath)
+                prepare()
+                start()
+            }
+            practiceRecorder = recorder
+            practiceRecordingFile = output
+            result.success(null)
+        } catch (e: Throwable) {
+            practiceRecorder?.release()
+            practiceRecorder = null
+            practiceRecordingFile = null
+            result.error("RECORDING_FAILED", e.message, null)
+        }
+    }
+
+    private fun stopPracticeRecording(keepFile: Boolean): String? {
+        val recorder = practiceRecorder ?: return null
+        practiceRecorder = null
+        val output = practiceRecordingFile
+        practiceRecordingFile = null
+        try {
+            recorder.stop()
+        } catch (_: Throwable) {
+            output?.delete()
+            recorder.release()
+            return null
+        }
+        recorder.release()
+        if (!keepFile) {
+            output?.delete()
+            return null
+        }
+        return output?.absolutePath
+    }
+
     private fun startListening(language: String) {
         val recognitionLanguage = normalizeRecognitionLanguage(language)
         speechRecognizer?.destroy()
@@ -339,7 +417,9 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, RecognitionL
         val result = pendingPermissionResult ?: return
         pendingPermissionResult = null
         if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
-            if (pendingLocalCapture) {
+            if (pendingPracticeRecording) {
+                startPracticeRecording(result)
+            } else if (pendingLocalCapture) {
                 result.success(asrService?.startCapture(pendingLanguage, pendingAsrProfileId) ?: false)
             } else {
                 startListening(pendingLanguage)
@@ -349,6 +429,7 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, RecognitionL
             result.error("MICROPHONE_PERMISSION_DENIED", "Microphone permission was denied.", null)
         }
         pendingLocalCapture = false
+        pendingPracticeRecording = false
         pendingAsrProfileId = null
     }
 
@@ -404,6 +485,7 @@ class MainActivity : FlutterActivity(), EventChannel.StreamHandler, RecognitionL
     }
 
     override fun onDestroy() {
+        stopPracticeRecording(keepFile = false)
         systemTtsService?.shutdown()
         speechRecognizer?.destroy()
         speechRecognizer = null

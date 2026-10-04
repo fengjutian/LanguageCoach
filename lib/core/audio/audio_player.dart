@@ -25,6 +25,8 @@ abstract interface class AudioPlayerService {
 
   Future<void> seek(Duration position);
 
+  Future<void> setSpeed(double speed);
+
   Future<void> release();
 
   Duration? get position;
@@ -75,6 +77,9 @@ class InMemoryAudioPlayer implements AudioPlayerService {
   Future<void> seek(Duration position) async {
     _position = position;
   }
+
+  @override
+  Future<void> setSpeed(double speed) async {}
 
   @override
   Future<void> release() async {

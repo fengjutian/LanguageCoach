@@ -54,6 +54,9 @@ class JustAudioPlayer implements AudioPlayerService {
   }
 
   @override
+  Future<void> setSpeed(double speed) => _player.setSpeed(speed);
+
+  @override
   Future<void> release() async {
     await _playerStateSub?.cancel();
     _playerStateSub = null;
