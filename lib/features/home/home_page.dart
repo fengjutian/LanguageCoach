@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../chat/chat_page.dart';
 import '../history/history_page.dart';
+import '../practice/practice_page.dart';
 import '../settings/settings_page.dart';
 
 class HomePage extends ConsumerStatefulWidget {
@@ -14,13 +15,22 @@ class HomePage extends ConsumerStatefulWidget {
 
 class _HomePageState extends ConsumerState<HomePage> {
   int index = 0;
+  String? _practicePrompt;
+
+  void _startPractice(String prompt) {
+    setState(() {
+      _practicePrompt = prompt;
+      index = 0;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
-    final pages = const [
-      ChatPage(),
-      HistoryPage(),
-      SettingsPage(),
+    final pages = [
+      ChatPage(initialPrompt: _practicePrompt),
+      PracticePage(onStart: _startPractice),
+      const HistoryPage(),
+      const SettingsPage(),
     ];
     return Scaffold(
       body: SafeArea(
@@ -34,6 +44,11 @@ class _HomePageState extends ConsumerState<HomePage> {
             icon: Icon(Icons.chat_bubble_outline),
             selectedIcon: Icon(Icons.chat_bubble),
             label: '对话',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.school_outlined),
+            selectedIcon: Icon(Icons.school),
+            label: '练习',
           ),
           NavigationDestination(icon: Icon(Icons.history), label: '历史'),
           NavigationDestination(icon: Icon(Icons.tune), label: '设置'),

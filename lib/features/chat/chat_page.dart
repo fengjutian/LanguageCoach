@@ -25,7 +25,9 @@ import 'widgets/session_error_card.dart';
 import 'widgets/waveform_view.dart';
 
 class ChatPage extends ConsumerStatefulWidget {
-  const ChatPage({super.key});
+  const ChatPage({super.key, this.initialPrompt});
+
+  final String? initialPrompt;
 
   @override
   ConsumerState<ChatPage> createState() => _ChatPageState();
@@ -48,6 +50,23 @@ class _ChatPageState extends ConsumerState<ChatPage> {
     super.initState();
     scrollController.addListener(_onScroll);
     WidgetsBinding.instance.addPostFrameCallback((_) => _hydrate());
+    _applyInitialPrompt(widget.initialPrompt);
+  }
+
+  @override
+  void didUpdateWidget(covariant ChatPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.initialPrompt != widget.initialPrompt) {
+      _applyInitialPrompt(widget.initialPrompt);
+    }
+  }
+
+  void _applyInitialPrompt(String? prompt) {
+    final value = prompt?.trim();
+    if (value == null || value.isEmpty) return;
+    controller
+      ..text = value
+      ..selection = TextSelection.collapsed(offset: value.length);
   }
 
   void _onScroll() {

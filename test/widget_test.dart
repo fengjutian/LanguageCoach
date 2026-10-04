@@ -13,6 +13,7 @@ import 'package:language_coach/core/models/app_settings.dart';
 import 'package:language_coach/core/repositories/in_memory_repositories.dart';
 import 'package:language_coach/features/chat/application/tts_controller.dart';
 import 'package:language_coach/features/home/home_page.dart';
+import 'package:language_coach/features/practice/practice_page.dart';
 import 'package:language_coach/features/settings/application/model_controller.dart';
 import 'package:language_coach/features/settings/application/settings_controller.dart';
 import 'package:language_coach/features/settings/settings_page.dart';
@@ -100,7 +101,8 @@ void main() {
     expect(value.speechSpeed, 1.25);
   });
 
-  testWidgets('HomePage mounts Chat, History, Settings tabs', (tester) async {
+  testWidgets('HomePage mounts Chat, Practice, History, Settings tabs',
+      (tester) async {
     final settings = InMemorySettingsRepository();
     final conversations = InMemoryConversationRepository();
     final tmp = Directory.systemTemp.createTempSync('home_test_root_');
@@ -121,7 +123,39 @@ void main() {
     await tester.pump();
     expect(find.byType(NavigationBar), findsOneWidget);
     expect(find.text('对话'), findsOneWidget);
+    expect(find.text('练习'), findsOneWidget);
     expect(find.text('历史'), findsOneWidget);
     expect(find.text('设置'), findsOneWidget);
+  });
+
+  testWidgets('Practice entry puts a contextual prompt in chat composer',
+      (tester) async {
+    final tmp = Directory.systemTemp.createTempSync('practice_test_root_');
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          settingsRepositoryProvider
+              .overrideWithValue(InMemorySettingsRepository()),
+          conversationRepositoryProvider
+              .overrideWithValue(InMemoryConversationRepository()),
+          audioPlayerServiceProvider.overrideWithValue(InMemoryAudioPlayer()),
+          ttsOutputDirectoryProvider.overrideWithValue(tmp),
+          modelDownloadServiceProvider.overrideWithValue(
+            _EmptyModelService(rootDirectory: tmp, events: _newEvents()),
+          ),
+        ],
+        child: const MaterialApp(home: HomePage()),
+      ),
+    );
+
+    await tester.tap(find.text('练习'));
+    await tester.pumpAndSettle();
+    expect(find.byType(PracticePage), findsOneWidget);
+    expect(find.text('跟读练习'), findsOneWidget);
+
+    await tester.tap(find.text('开始跟读'));
+    await tester.pumpAndSettle();
+    final field = tester.widget<TextField>(find.byType(TextField));
+    expect(field.controller?.text, contains('3 句适合跟读的英语日常表达'));
   });
 }
