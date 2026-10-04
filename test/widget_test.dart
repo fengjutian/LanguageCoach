@@ -15,6 +15,7 @@ import 'package:language_coach/features/chat/application/tts_controller.dart';
 import 'package:language_coach/features/home/home_page.dart';
 import 'package:language_coach/features/practice/practice_page.dart';
 import 'package:language_coach/features/practice/repeat_practice_page.dart';
+import 'package:language_coach/features/practice/shadowing_page.dart';
 import 'package:language_coach/features/settings/application/model_controller.dart';
 import 'package:language_coach/features/settings/application/settings_controller.dart';
 import 'package:language_coach/features/settings/settings_page.dart';
@@ -129,8 +130,7 @@ void main() {
     expect(find.text('设置'), findsOneWidget);
   });
 
-  testWidgets('Practice entry opens the dedicated repeat flow',
-      (tester) async {
+  testWidgets('Practice entry opens the dedicated repeat flow', (tester) async {
     final tmp = Directory.systemTemp.createTempSync('practice_test_root_');
     await tester.pumpWidget(
       ProviderScope(
@@ -160,5 +160,15 @@ void main() {
     expect(find.text('1. 播放原句'), findsOneWidget);
     expect(find.text('2. 开始跟读'), findsOneWidget);
     expect(find.text('音素'), findsNothing);
+
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    await tester.drag(find.byType(ListView).last, const Offset(0, -260));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('开始影子训练'));
+    await tester.pumpAndSettle();
+    expect(find.byType(ShadowingPage), findsOneWidget);
+    expect(find.text('0.75×'), findsOneWidget);
+    expect(find.text('不循环 · 1.0×'), findsOneWidget);
   });
 }

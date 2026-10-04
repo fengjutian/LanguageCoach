@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../core/audio/audio_player.dart';
 import '../../core/audio/practice_recorder.dart';
 import '../../core/audio/tts_models.dart';
 import '../../core/models/app_settings.dart';
@@ -202,7 +201,7 @@ class _ShadowingPageState extends ConsumerState<ShadowingPage> {
                       ],
                     ),
                     const SizedBox(height: 8),
-                    Text('${_loopLabel} · ${_speed}×'),
+                    Text('$_loopLabel · $_speed×'),
                     if (_recordingPath != null)
                       TextButton.icon(
                         onPressed: _playRecording,
@@ -267,11 +266,12 @@ class _ShadowingPageState extends ConsumerState<ShadowingPage> {
         );
       }
     } finally {
-      if (mounted)
+      if (mounted) {
         setState(() {
           _playing = false;
           _loading = false;
         });
+      }
     }
   }
 
@@ -298,11 +298,12 @@ class _ShadowingPageState extends ConsumerState<ShadowingPage> {
     try {
       if (_recording) {
         final path = await recorder.stop();
-        if (mounted)
+        if (mounted) {
           setState(() {
             _recording = false;
             _recordingPath = path;
           });
+        }
       } else {
         await _stop();
         await recorder.start();
