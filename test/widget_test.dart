@@ -181,5 +181,12 @@ void main() {
     expect(find.byType(RoleplayPage), findsOneWidget);
     expect(find.text('酒店入住'), findsWidgets);
     expect(find.text('进入场景'), findsOneWidget);
+    await tester.tap(find.text('进入场景'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Good evening. Welcome to the hotel. How may I help you?'),
+      findsOneWidget,
+    );
+    expect(find.text('结束并总结'), findsOneWidget);
   });
 }
