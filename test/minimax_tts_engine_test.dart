@@ -163,13 +163,13 @@ void main() {
       expect(adapter.lastHeaders?['Authorization'], 'Bearer sk-test');
       expect(adapter.lastHeaders?['Content-Type'], 'application/json');
       final body = adapter.lastBody!;
-      expect(body['model'], 'speech-2.6-hd');
+      expect(body['model'], 'speech-2.8-hd');
       expect(body['text'], '你好，世界');
       expect(body['stream'], false);
       expect(body['output_format'], 'hex');
       expect(body['language_boost'], 'Chinese');
       final voiceSetting = body['voice_setting']! as Map;
-      expect(voiceSetting['voice_id'], 'Chinese_Female_Sharp');
+      expect(voiceSetting['voice_id'], 'male-qn-qingse');
       expect(voiceSetting['speed'], 1.15);
       final audioSetting = body['audio_setting']! as Map;
       expect(audioSetting['format'], 'mp3');
@@ -230,8 +230,96 @@ void main() {
 
       expect(
         (adapter.lastBody!['voice_setting']! as Map)['voice_id'],
-        'English_expressive_narrator',
+        'male-qn-qingse',
       );
+    });
+
+    test('uses one verified multilingual voice and the correct language boost '
+        'for every supported app language', () async {
+      const expectedBoosts = <String, String>{
+        'en': 'English',
+        'ja': 'Japanese',
+        'fr': 'French',
+        'ko': 'Korean',
+        'es': 'Spanish',
+        'de': 'German',
+        'it': 'Italian',
+        'zh-CN': 'Chinese',
+        'ru': 'Russian',
+        'pt': 'Portuguese',
+      };
+
+      for (final entry in expectedBoosts.entries) {
+        final adapter = _ScriptedAdapter(
+          body: {
+            'data': {'audio': _hexEncode([0xAA, 0xBB]), 'status': 2},
+            'extra_info': {'audio_format': 'mp3'},
+            'base_resp': {'status_code': 0},
+          },
+        );
+        final engine = MinimaxTtsEngine(
+          dio: Dio()..httpClientAdapter = adapter,
+          apiKeyResolver: () async => 'sk-test',
+          outputDirectory: cacheDir,
+        );
+
+        await engine.synthesize(TtsRequest(
+          text: 'language test',
+          language: entry.key,
+          voiceId: '${entry.key}_neutral',
+        ));
+
+        expect(
+          (adapter.lastBody!['voice_setting']! as Map)['voice_id'],
+          'male-qn-qingse',
+          reason: 'default voice for ${entry.key}',
+        );
+        expect(
+          adapter.lastBody!['language_boost'],
+          entry.value,
+          reason: 'language boost for ${entry.key}',
+        );
+        await engine.dispose();
+      }
+    });
+
+    test('maps legacy built-in voice ids to the verified system voice',
+        () async {
+      const legacyIds = <String>[
+        'Chinese_Female_Sharp',
+        'English_expressive_narrator',
+        'English_Graceful_Hearts',
+        'Japanese_Internet_Celebrity',
+        'French_Female_News_Anchor',
+      ];
+
+      for (final legacyId in legacyIds) {
+        final adapter = _ScriptedAdapter(
+          body: {
+            'data': {'audio': _hexEncode([0xAA, 0xBB]), 'status': 2},
+            'extra_info': {'audio_format': 'mp3'},
+            'base_resp': {'status_code': 0},
+          },
+        );
+        final engine = MinimaxTtsEngine(
+          dio: Dio()..httpClientAdapter = adapter,
+          apiKeyResolver: () async => 'sk-test',
+          outputDirectory: cacheDir,
+        );
+
+        await engine.synthesize(TtsRequest(
+          text: 'legacy voice test',
+          language: 'ja',
+          voiceId: legacyId,
+        ));
+
+        expect(
+          (adapter.lastBody!['voice_setting']! as Map)['voice_id'],
+          'male-qn-qingse',
+          reason: legacyId,
+        );
+        await engine.dispose();
+      }
     });
 
     test('throws TtsError(engineUnavailable) when key is missing', () async {

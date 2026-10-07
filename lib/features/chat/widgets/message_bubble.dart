@@ -377,14 +377,6 @@ class MessageBubble extends ConsumerWidget {
                 final sentenceId = 's_${message.id}_${entry.key}';
                 final state = ttsState.sentenceStates[sentenceId] ??
                     SentencePlaybackState.idle;
-                // Show the engine's typed error under the failed
-                // tile so the user can tell whether the cause is a
-                // missing API key, a network blip, or a malformed
-                // payload — without this the UI looked identical to
-                // a successful but silent playback.
-                final errorMessage = state == SentencePlaybackState.failed
-                    ? ttsState.lastError?.message
-                    : null;
                 return _SentenceTile(
                   index: entry.key,
                   text: entry.value.text,
@@ -392,7 +384,6 @@ class MessageBubble extends ConsumerWidget {
                   messageId: message.id,
                   playbackState: state,
                   isPlaying: ttsState.currentSentenceId == sentenceId,
-                  errorMessage: errorMessage,
                   onPlay: () => tts.playSingleSentence(
                     conversationId: conversationId,
                     messageId: message.id,
@@ -502,7 +493,6 @@ class _SentenceTile extends StatelessWidget {
     required this.isPlaying,
     required this.onPlay,
     required this.onRetry,
-    this.errorMessage,
   });
 
   final int index;
@@ -513,11 +503,6 @@ class _SentenceTile extends StatelessWidget {
   final bool isPlaying;
   final VoidCallback onPlay;
   final VoidCallback onRetry;
-
-  /// When [playbackState] is [SentencePlaybackState.failed], this is
-  /// the engine's typed error message so the user can tell a missing
-  /// API key from a network blip instead of staring at a silent icon.
-  final String? errorMessage;
 
   IconData _iconForState() {
     if (isPlaying) return Icons.graphic_eq;
@@ -584,21 +569,6 @@ class _SentenceTile extends StatelessWidget {
                       fontSize: 12,
                     ),
                   ),
-                  if (failed &&
-                      errorMessage != null &&
-                      errorMessage!.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 2),
-                      child: Text(
-                        errorMessage!,
-                        style: TextStyle(
-                          color: scheme.error,
-                          fontSize: 11,
-                        ),
-                        maxLines: 3,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
                 ],
               ),
             ),

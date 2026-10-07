@@ -26,7 +26,7 @@ class MinimaxTtsEngine implements TtsEngine {
     // matching host as well. Sending that key to api.minimax.io produces a
     // misleading `invalid api key` after the text reply has already loaded.
     String baseUrl = 'https://api.minimaxi.com/v1',
-    String model = 'speech-2.6-hd',
+    String model = 'speech-2.8-hd',
     String? id,
   })  : _dio = dio,
         _apiKeyResolver = apiKeyResolver,
@@ -169,8 +169,17 @@ class MinimaxTtsEngine implements TtsEngine {
     };
   }
 
-  /// Maps the app's engine-neutral voice ids to ids accepted by MiniMax.
-  /// Unknown ids are preserved so custom MiniMax voices keep working.
+  /// A system voice documented by MiniMax for the current T2A v2 API.
+  ///
+  /// MiniMax voices are multilingual: the pronunciation language is selected
+  /// by `language_boost`, not by inventing a language-prefixed voice id.  The
+  /// old per-language ids (for example `Japanese_Internet_Celebrity`) are not
+  /// available in every account/region and caused `voice is not exist`.
+  static const String _safeSystemVoice = 'male-qn-qingse';
+
+  /// Maps app-owned, engine-neutral ids to a verified MiniMax system voice.
+  /// Unknown ids are preserved because they may be valid custom/cloned voice
+  /// ids owned by the current MiniMax account.
   String _miniMaxVoiceId(String requestedVoiceId, String languageCode) {
     if (requestedVoiceId.isEmpty ||
         requestedVoiceId == 'default' ||
@@ -179,30 +188,23 @@ class MinimaxTtsEngine implements TtsEngine {
     }
     switch (requestedVoiceId) {
       case 'en_us_female_warm':
-        return 'English_Graceful_Hearts';
+        return _safeSystemVoice;
+      // Values emitted by older LanguageCoach builds. They looked like
+      // official language-specific ids but are not portable between the
+      // mainland and international MiniMax platforms. Treat them as legacy
+      // app aliases rather than sending them back to the API.
+      case 'Chinese_Female_Sharp':
+      case 'English_expressive_narrator':
+      case 'English_Graceful_Hearts':
+      case 'Japanese_Internet_Celebrity':
+      case 'French_Female_News_Anchor':
+        return _safeSystemVoice;
       default:
         return requestedVoiceId;
     }
   }
 
-  String _defaultVoiceFor(String languageCode) {
-    switch (languageCode) {
-      case 'zh-CN':
-      case 'zh':
-        return 'Chinese_Female_Sharp';
-      case 'en-US':
-      case 'en':
-        return 'English_expressive_narrator';
-      case 'ja-JP':
-      case 'ja':
-        return 'Japanese_Internet_Celebrity';
-      case 'fr-FR':
-      case 'fr':
-        return 'French_Female_News_Anchor';
-      default:
-        return 'English_expressive_narrator';
-    }
-  }
+  String _defaultVoiceFor(String languageCode) => _safeSystemVoice;
 
   String _languageBoost(String languageCode) {
     if (languageCode.isEmpty) return 'auto';

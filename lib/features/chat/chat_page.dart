@@ -18,7 +18,6 @@ import 'application/tts_controller.dart';
 import 'application/waveform_controller.dart';
 import 'widgets/message_bubble.dart';
 import 'widgets/session_character.dart';
-import 'widgets/session_error_card.dart';
 import 'widgets/waveform_view.dart';
 
 /// Renders the transcript for whatever conversation [chatControllerProvider]
@@ -211,6 +210,22 @@ class _ChatPageState extends ConsumerState<ChatPage> {
     // ended — leaving either running would talk over a conversation the user
     // is no longer looking at.
     ref.listen<ChatState>(chatControllerProvider, (prev, next) {
+      if (next.error != null && next.error != prev?.error) {
+        AppToast.error(context, next.error!);
+      }
+      final previousErrorIds = prev?.messages
+              .where((message) => message.role == MessageRole.error)
+              .map((message) => message.id)
+              .toSet() ??
+          const <String>{};
+      for (final message in next.messages.where(
+        (message) =>
+            message.role == MessageRole.error &&
+            !previousErrorIds.contains(message.id),
+      )) {
+        final text = message.sourceText?.trim();
+        if (text != null && text.isNotEmpty) AppToast.error(context, text);
+      }
       if (prev == null || prev.epoch == next.epoch) return;
       if (controller.text.trim().isNotEmpty) controller.clear();
       setState(() => _atBottom = true);
@@ -218,7 +233,16 @@ class _ChatPageState extends ConsumerState<ChatPage> {
       unawaited(_stopSessionAudio());
     });
 
-    final messages = chat.messages;
+    ref.listen<TtsPlaybackState>(ttsControllerProvider, (prev, next) {
+      final error = next.lastError;
+      if (error != null && !identical(error, prev?.lastError)) {
+        AppToast.error(context, error.message);
+      }
+    });
+
+    final messages = chat.messages
+        .where((message) => message.role != MessageRole.error)
+        .toList(growable: false);
     final turnLanguageLabel = chat.lastTurnLanguage?.label;
 
     return Scaffold(
@@ -233,11 +257,6 @@ class _ChatPageState extends ConsumerState<ChatPage> {
               _ExplicitLanguageNotice(language: chat.lastTurnLanguage!),
             if (chat.loadStatus == ChatLoadStatus.loading)
               const LinearProgressIndicator(minHeight: 2),
-            if (chat.error != null)
-              _ChatLoadErrorBanner(
-                message: chat.error!,
-                onRetry: chatController.initialize,
-              ),
             Expanded(
               child: messages.isEmpty
                   ? _EmptyState(
@@ -253,14 +272,6 @@ class _ChatPageState extends ConsumerState<ChatPage> {
                             final message = messages[index];
                             final isStreamingBubble = chat.isStreaming &&
                                 index == messages.length - 1;
-                            if (message.role == MessageRole.error) {
-                              return _ErrorBubble(
-                                text: message.sourceText ?? '',
-                                onRetry: chat.isStreaming
-                                    ? null
-                                    : chatController.regenerateLast,
-                              );
-                            }
                             final isLast = index == messages.length - 1;
                             return MessageBubble(
                               message: message,
@@ -498,38 +509,6 @@ class _ExplicitLanguageNotice extends StatelessWidget {
           fontSize: 12,
           color: scheme.onSecondaryContainer,
           fontWeight: FontWeight.w600,
-        ),
-      ),
-    );
-  }
-}
-
-class _ChatLoadErrorBanner extends StatelessWidget {
-  const _ChatLoadErrorBanner({required this.message, required this.onRetry});
-
-  final String message;
-  final Future<void> Function() onRetry;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Material(
-      color: scheme.errorContainer,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 8, 8, 8),
-        child: Row(
-          children: [
-            Expanded(
-              child: Text(
-                message,
-                style: TextStyle(color: scheme.onErrorContainer, fontSize: 13),
-              ),
-            ),
-            TextButton(
-              onPressed: () => onRetry(),
-              child: const Text('重试'),
-            ),
-          ],
         ),
       ),
     );
@@ -809,37 +788,6 @@ class _ComposerState extends State<_Composer> {
   }
 }
 
-class _ErrorBubble extends StatelessWidget {
-  const _ErrorBubble({required this.text, this.onRetry});
-  final String text;
-  final VoidCallback? onRetry;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.symmetric(vertical: 8),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.errorContainer,
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Row(
-        children: [
-          Icon(Icons.error_outline,
-              color: Theme.of(context).colorScheme.onErrorContainer),
-          const SizedBox(width: 12),
-          Expanded(
-              child: Text(text,
-                  style: TextStyle(
-                      color: Theme.of(context).colorScheme.onErrorContainer))),
-          if (onRetry != null)
-            TextButton(onPressed: onRetry, child: const Text('重试')),
-        ],
-      ),
-    );
-  }
-}
-
 /// Status strip above the composer — shows the placeholder character
 /// during the recording/processing/playing phases, the live waveform
 /// while ASR is producing samples, and a retry card when the session
@@ -851,7 +799,6 @@ class _SessionStatusStripHost extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     return _SessionStatusStrip(
       phase: ref.watch(chatSessionPhaseProvider),
-      error: ref.watch(chatSessionErrorProvider),
     );
   }
 }
@@ -859,17 +806,12 @@ class _SessionStatusStripHost extends ConsumerWidget {
 class _SessionStatusStrip extends ConsumerWidget {
   const _SessionStatusStrip({
     required this.phase,
-    required this.error,
   });
 
   final ChatSessionPhase phase;
-  final SessionError? error;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    if (error != null) {
-      return SessionErrorCard(error: error!);
-    }
     if (phase == ChatSessionPhase.recording) {
       // Reset the buffer on phase entry so the waveform only shows
       // samples from the active session.
@@ -937,6 +879,12 @@ class _ChatDrawer extends ConsumerWidget {
     final conversations = ref.watch(historyControllerProvider);
     final currentId = ref.watch(chatControllerProvider).conversationId;
     final scheme = Theme.of(context).colorScheme;
+
+    ref.listen(historyControllerProvider, (prev, next) {
+      if (next.hasError && next.error != prev?.error) {
+        AppToast.error(context, '加载对话失败：${next.error}');
+      }
+    });
 
     return Drawer(
       child: SafeArea(
@@ -1020,7 +968,7 @@ class _ChatDrawer extends ConsumerWidget {
                   );
                 },
                 loading: () => const Center(child: CircularProgressIndicator()),
-                error: (e, _) => Center(child: Text('加载失败：$e')),
+                error: (_, __) => const SizedBox.shrink(),
               ),
             ),
           ],
