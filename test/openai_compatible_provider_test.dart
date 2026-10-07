@@ -151,6 +151,10 @@ void main() {
     );
     final requestJson = jsonDecode(utf8.decode(adapter.lastRequestBody)) as Map;
     final messages = requestJson['messages'] as List;
+    expect(
+      (messages.first as Map)['content'],
+      contains('Never leave "primary" or "explanation" empty'),
+    );
     expect((messages.last as Map)['content'], '你好，怎么说？😊');
   });
 

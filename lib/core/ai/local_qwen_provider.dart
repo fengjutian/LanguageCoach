@@ -210,9 +210,15 @@ class LocalQwenProvider implements LlmProvider {
   /// lives in [_buildComplete].
   String _composePrompt(CoachRequest request, List<ChatMessage> context) {
     final sys = StringBuffer()
-      ..writeln('You are a friendly language practice partner.')
+      ..writeln('You are a friendly language tutor.')
       ..writeln('Target language: ${request.targetLanguage.code}')
-      ..writeln('Respond only in the target language, briefly.');
+      ..writeln('Always teach the user, even when their input is only one word, name, or place.')
+      ..writeln('Return exactly two sections in this format:')
+      ..writeln('<ANSWER>')
+      ..writeln('A brief, natural answer in the target language.')
+      ..writeln('<EXPLANATION>')
+      ..writeln('A useful explanation in the user\'s language. For a word or place, include its meaning, pronunciation or transliteration, and a usage note.')
+      ..writeln('Never leave either section empty.');
     final history = StringBuffer();
     for (final msg in context) {
       // User turns keep their text in `sourceText` and have a null
@@ -240,7 +246,9 @@ class LocalQwenProvider implements LlmProvider {
   LlmEventComplete _buildComplete(String text, CoachRequest request) {
     final trimmed = text.trim();
     final extraction = _extractThinking(trimmed);
-    final answer = extraction.cleaned.isEmpty ? trimmed : extraction.cleaned;
+    final cleaned = extraction.cleaned.isEmpty ? trimmed : extraction.cleaned;
+    final sections = _splitTeachingSections(cleaned);
+    final answer = sections.answer;
     final rawSentences = _splitter.split(answer);
     final sentences = <CoachSentence>[];
     for (var i = 0; i < rawSentences.length; i++) {
@@ -255,7 +263,7 @@ class LocalQwenProvider implements LlmProvider {
       primary: answer,
       thinking: extraction.thinking,
       alternatives: const <String>[],
-      explanation: '由本地 Qwen3 模型生成。',
+      explanation: sections.explanation,
       sentences: sentences,
       keywords: keywords,
     );
@@ -268,6 +276,31 @@ class LocalQwenProvider implements LlmProvider {
         response: response,
         model: id,
       ),
+    );
+  }
+
+  _TeachingSections _splitTeachingSections(String text) {
+    const answerMarker = '<ANSWER>';
+    const explanationMarker = '<EXPLANATION>';
+    final explanationAt = text.indexOf(explanationMarker);
+    if (explanationAt < 0) {
+      return _TeachingSections(
+        text.replaceFirst(answerMarker, '').trim(),
+        '本地模型没有返回教学解释。你可以点击重新生成，或直接追问“请解释这个表达”。',
+      );
+    }
+    final answer = text
+        .substring(0, explanationAt)
+        .replaceFirst(answerMarker, '')
+        .trim();
+    final explanation = text
+        .substring(explanationAt + explanationMarker.length)
+        .trim();
+    return _TeachingSections(
+      answer.isEmpty ? text.trim() : answer,
+      explanation.isEmpty
+          ? '本地模型没有返回教学解释。你可以点击重新生成，或直接追问“请解释这个表达”。'
+          : explanation,
     );
   }
 
@@ -396,4 +429,11 @@ class _ThinkingSplit {
   const _ThinkingSplit(this.thinking, this.cleaned);
   final String thinking;
   final String cleaned;
+}
+
+class _TeachingSections {
+  const _TeachingSections(this.answer, this.explanation);
+
+  final String answer;
+  final String explanation;
 }

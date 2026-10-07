@@ -205,6 +205,40 @@ void main() {
       final prompt = bridge.lastPrompt ?? '';
       expect(prompt, contains('user: Where is the station?'));
       expect(prompt, contains('assistant: It is two blocks away.'));
+      expect(prompt, contains('<EXPLANATION>'));
+      expect(prompt, contains('Never leave either section empty'));
+    });
+
+    test('separates the local teaching explanation from the answer', () async {
+      final bridge = _ScriptedBridge();
+      final provider =
+          LocalQwenProvider(bridge: bridge, modelId: qwen3Llm06B.id);
+      final received = <LlmEvent>[];
+      final sub = provider
+          .generateStream(
+            const CoachRequest(
+              text: '南京',
+              targetLanguage: CoachLanguage.english,
+              intent: CoachIntent.conversation,
+            ),
+            const <ChatMessage>[],
+          )
+          .listen(received.add);
+      addTearDown(() => _ignoreFuture(sub.cancel()));
+      await pumpMicrotasks();
+
+      final sessionId = bridge.methodCalls.last.split(':')[1];
+      bridge.emitLlmToken(
+        sessionId,
+        '<ANSWER>Nanjing<EXPLANATION>“南京”译作 Nanjing，读音按汉语拼音转写。',
+      );
+      bridge.emitLlmComplete(sessionId);
+      await pumpMicrotasks();
+
+      final response = received.whereType<LlmEventComplete>().single.response;
+      expect(response.primary, 'Nanjing');
+      expect(response.explanation, contains('汉语拼音'));
+      expect(response.primary, isNot(contains('<ANSWER>')));
     });
 
     test('stream ending without LLM_COMPLETE still settles', () async {

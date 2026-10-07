@@ -51,6 +51,16 @@ JSON object (no prose, no markdown fences) matching this schema:
   "sentences": [{"id": "<stable id>", "text": "<one sentence>"}],
   "keywords": ["<key vocabulary>"]
 }
+
+Teaching requirements:
+- Never leave "primary" or "explanation" empty.
+- Treat a short word, name, or place (for example, "南京") as a vocabulary
+  question: give its natural target-language form in "primary", then explain
+  its meaning, pronunciation/transliteration, and one useful usage note in
+  "explanation".
+- For every other request, "explanation" must briefly teach why the primary
+  answer is natural or correct. Write it in the language used by the user.
+- Put at least one complete, speakable target-language example in "sentences".
 ''';
 
   @override
