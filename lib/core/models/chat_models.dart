@@ -129,6 +129,7 @@ class CoachResponse {
   final String sourceLanguage;
   final String targetLanguage;
   final String primary;
+
   /// Simplified-Chinese rendering of [primary]. Empty only for legacy,
   /// malformed, or already-Chinese responses.
   final String chineseTranslation;
@@ -198,9 +199,9 @@ class CoachResponse {
       targetLanguage: raw['targetLanguage']?.toString() ?? '',
       primary: primary,
       chineseTranslation: (raw['chineseTranslation'] ??
-              raw['chinese_translation'] ??
-              raw['translationZh'])
-          ?.toString() ??
+                  raw['chinese_translation'] ??
+                  raw['translationZh'])
+              ?.toString() ??
           '',
       thinking: raw['thinking']?.toString() ?? '',
       alternatives: _readStringList(raw['alternatives']),

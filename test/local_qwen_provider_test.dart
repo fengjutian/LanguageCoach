@@ -206,7 +206,8 @@ void main() {
       expect(prompt, contains('user: Where is the station?'));
       expect(prompt, contains('assistant: It is two blocks away.'));
       expect(prompt, contains('<EXPLANATION>'));
-      expect(prompt, contains('Never leave either section empty'));
+      expect(prompt, contains('<CHINESE_TRANSLATION>'));
+      expect(prompt, contains('Never leave any section empty'));
     });
 
     test('separates the local teaching explanation from the answer', () async {
@@ -228,13 +229,15 @@ void main() {
       final sessionId = bridge.methodCalls.last.split(':')[1];
       bridge.emitLlmToken(
         sessionId,
-        '<ANSWER>Nanjing<EXPLANATION>“南京”译作 Nanjing，读音按汉语拼音转写。',
+        '<ANSWER>Nanjing<CHINESE_TRANSLATION>南京'
+        '<EXPLANATION>“南京”译作 Nanjing，读音按汉语拼音转写。',
       );
       bridge.emitLlmComplete(sessionId);
       await pumpMicrotasks();
 
       final response = received.whereType<LlmEventComplete>().single.response;
       expect(response.primary, 'Nanjing');
+      expect(response.chineseTranslation, '南京');
       expect(response.explanation, contains('汉语拼音'));
       expect(response.primary, isNot(contains('<ANSWER>')));
     });

@@ -158,6 +158,8 @@ void main() {
       expect(userPrompt, contains('required target language: ja'));
       expect(userPrompt, contains(CoachLanguage.japanese.label));
       final systemPrompt = messages.first['content'] as String;
+      expect(systemPrompt, contains('chineseTranslation'));
+      expect(systemPrompt, contains('Simplified Chinese'));
       expect(
         systemPrompt,
         contains('history NEVER overrides the metadata for the current turn'),

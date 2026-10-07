@@ -298,17 +298,26 @@ class LocalQwenProvider implements LlmProvider {
     const explanationMarker = '<EXPLANATION>';
     final translationAt = text.indexOf(translationMarker);
     final explanationAt = text.indexOf(explanationMarker);
-    if (translationAt < 0 || explanationAt < 0 || explanationAt < translationAt) {
+    if (explanationAt < 0) {
       return _TeachingSections(
         text.replaceFirst(answerMarker, '').trim(),
         '',
         '本地模型没有返回教学解释。你可以点击重新生成，或直接追问“请解释这个表达”。',
       );
     }
-    final answer = text
-        .substring(0, translationAt)
-        .replaceFirst(answerMarker, '')
-        .trim();
+    // Backward compatibility for output produced with the old two-section
+    // prompt. Keep ANSWER clean and surface the absent translation explicitly.
+    if (translationAt < 0 || explanationAt < translationAt) {
+      final answer = text
+          .substring(0, explanationAt)
+          .replaceFirst(answerMarker, '')
+          .trim();
+      final explanation =
+          text.substring(explanationAt + explanationMarker.length).trim();
+      return _TeachingSections(answer, '', explanation);
+    }
+    final answer =
+        text.substring(0, translationAt).replaceFirst(answerMarker, '').trim();
     final chineseTranslation = text
         .substring(translationAt + translationMarker.length, explanationAt)
         .trim();
