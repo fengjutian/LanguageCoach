@@ -29,6 +29,11 @@ String _languageLabel(String code) {
   return '目标表达';
 }
 
+bool _isChineseLanguage(String code) {
+  final normalized = code.toLowerCase();
+  return normalized == 'zh' || normalized.startsWith('zh-');
+}
+
 /// Renders [text] as plain text most of the time, but switches to a markdown
 /// pipeline whenever the content looks like markdown. Styles inherit from the
 /// caller-supplied [style] so headings / bold / italic all keep the same base
@@ -290,6 +295,35 @@ class MessageBubble extends ConsumerWidget {
               style: const TextStyle(color: Colors.black54),
             ),
           ],
+          if (!_isChineseLanguage(response.targetLanguage)) ...[
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.secondaryContainer,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '中文意思',
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSecondaryContainer,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 5),
+                  _BubbleText(
+                    text: response.chineseTranslation.trim().isEmpty
+                        ? '该回复未提供中文翻译，请重新生成。'
+                        : response.chineseTranslation,
+                  ),
+                ],
+              ),
+            ),
+          ],
           const SizedBox(height: 12),
           Row(
             children: [
@@ -405,6 +439,7 @@ class MessageBubble extends ConsumerWidget {
             const SizedBox(height: 10),
             _BubbleActions(
               text: response.primary,
+              chineseTranslation: response.chineseTranslation,
               explanation: response.explanation,
               sentences:
                   response.sentences.map((s) => s.text).toList(growable: false),
@@ -662,18 +697,26 @@ class _ThinkingExpansionState extends State<_ThinkingExpansion> {
 class _BubbleActions extends StatelessWidget {
   const _BubbleActions({
     required this.text,
+    required this.chineseTranslation,
     required this.explanation,
     required this.sentences,
     required this.onRegenerate,
   });
 
   final String text;
+  final String chineseTranslation;
   final String explanation;
   final List<String> sentences;
   final VoidCallback? onRegenerate;
 
   String _composeClipboardPayload() {
     final buf = StringBuffer()..writeln(text);
+    if (chineseTranslation.isNotEmpty) {
+      buf
+        ..writeln()
+        ..writeln('— 中文意思 —')
+        ..writeln(chineseTranslation);
+    }
     if (explanation.isNotEmpty) {
       buf
         ..writeln()

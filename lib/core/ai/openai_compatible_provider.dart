@@ -46,6 +46,7 @@ JSON object (no prose, no markdown fences) matching this schema:
   "sourceLanguage": "<iso code, or 'auto'>",
   "targetLanguage": "<iso code>",
   "primary": "<main answer in the target language>",
+  "chineseTranslation": "<complete Simplified-Chinese translation of primary>",
   "alternatives": ["<other acceptable answers>"],
   "explanation": "<short explanation in the user's input language>",
   "sentences": [{"id": "<stable id>", "text": "<one sentence>"}],
@@ -53,7 +54,9 @@ JSON object (no prose, no markdown fences) matching this schema:
 }
 
 Teaching requirements:
-- Never leave "primary" or "explanation" empty.
+- Never leave "primary", "chineseTranslation", or "explanation" empty.
+- "chineseTranslation" MUST give the complete meaning of "primary" in
+  Simplified Chinese. If the target language is Chinese, copy "primary".
 - "primary" and "sentences" MUST be written in the required target language
   named in the request metadata. The conversation history may be in another
   language; history NEVER overrides the metadata for the current turn.
@@ -61,8 +64,8 @@ Teaching requirements:
   question: give its natural target-language form in "primary", then explain
   its meaning, pronunciation/transliteration, and one useful usage note in
   "explanation".
-- For every other request, "explanation" must briefly teach why the primary
-  answer is natural or correct. Write it in the language used by the user.
+- For every other request, "explanation" must briefly teach in Simplified
+  Chinese why the primary answer is natural or correct.
 - Put at least one complete, speakable target-language example in "sentences".
 ''';
 
@@ -199,7 +202,8 @@ Learner input: ${request.text}
 Request metadata (follow this; do not copy it into the answer):
 - detected intent: ${request.intent.name}
 - required target language: ${request.targetLanguage.code} (${request.targetLanguage.label})
-- explanation language: the language of the learner input
+- chineseTranslation language: Simplified Chinese (required)
+- explanation language: Simplified Chinese
 $switchNotice''';
   }
 

@@ -38,6 +38,7 @@ ChatMessage _sampleMessage() => ChatMessage(
         sourceLanguage: 'zh-CN',
         targetLanguage: 'en',
         primary: 'It is raining today.',
+        chineseTranslation: '今天下雨。',
         explanation: 'simple present progressive',
         sentences: const [
           CoachSentence(id: 's_msg1_0', text: 'It is raining.'),
@@ -82,8 +83,34 @@ void main() {
     expect(find.text('It is raining today.'), findsOneWidget);
     expect(find.text('It is raining.'), findsOneWidget);
     expect(find.text('Today is grey.'), findsOneWidget);
+    expect(find.text('中文意思'), findsOneWidget);
+    expect(find.text('今天下雨。'), findsOneWidget);
     expect(find.text('逐句 1'), findsOneWidget);
     expect(find.text('逐句 2'), findsOneWidget);
+  });
+
+  testWidgets('does not repeat a Chinese translation for a Chinese answer',
+      (tester) async {
+    final message = ChatMessage(
+      id: 'msg_zh',
+      role: MessageRole.assistant,
+      createdAt: DateTime(2026),
+      response: const CoachResponse(
+        intent: CoachIntent.conversation,
+        sourceLanguage: 'auto',
+        targetLanguage: 'zh-CN',
+        primary: '今天下雨。',
+        chineseTranslation: '今天下雨。',
+        explanation: '中文回答无需重复翻译。',
+        sentences: [],
+      ),
+    );
+    await tester.pumpWidget(_wrap(
+      MessageBubble(message: message, conversationId: 'c1'),
+    ));
+
+    expect(find.text('中文意思'), findsNothing);
+    expect(find.text('今天下雨。'), findsOneWidget);
   });
 
   testWidgets('tapping whole-message play updates TtsPlaybackState',

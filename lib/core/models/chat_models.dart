@@ -119,6 +119,7 @@ class CoachResponse {
     required this.primary,
     required this.explanation,
     required this.sentences,
+    this.chineseTranslation = '',
     this.thinking = '',
     this.alternatives = const <String>[],
     this.keywords = const <String>[],
@@ -128,6 +129,9 @@ class CoachResponse {
   final String sourceLanguage;
   final String targetLanguage;
   final String primary;
+  /// Simplified-Chinese rendering of [primary]. Empty only for legacy,
+  /// malformed, or already-Chinese responses.
+  final String chineseTranslation;
   final String thinking;
   final List<String> alternatives;
   final String explanation;
@@ -139,6 +143,7 @@ class CoachResponse {
     String? sourceLanguage,
     String? targetLanguage,
     String? primary,
+    String? chineseTranslation,
     String? thinking,
     List<String>? alternatives,
     String? explanation,
@@ -150,6 +155,7 @@ class CoachResponse {
       sourceLanguage: sourceLanguage ?? this.sourceLanguage,
       targetLanguage: targetLanguage ?? this.targetLanguage,
       primary: primary ?? this.primary,
+      chineseTranslation: chineseTranslation ?? this.chineseTranslation,
       thinking: thinking ?? this.thinking,
       alternatives: alternatives ?? this.alternatives,
       explanation: explanation ?? this.explanation,
@@ -191,6 +197,11 @@ class CoachResponse {
       sourceLanguage: raw['sourceLanguage']?.toString() ?? 'auto',
       targetLanguage: raw['targetLanguage']?.toString() ?? '',
       primary: primary,
+      chineseTranslation: (raw['chineseTranslation'] ??
+              raw['chinese_translation'] ??
+              raw['translationZh'])
+          ?.toString() ??
+          '',
       thinking: raw['thinking']?.toString() ?? '',
       alternatives: _readStringList(raw['alternatives']),
       explanation: raw['explanation']?.toString() ?? '',
@@ -207,6 +218,7 @@ class CoachResponse {
         'sourceLanguage': sourceLanguage,
         'targetLanguage': targetLanguage,
         'primary': primary,
+        'chineseTranslation': chineseTranslation,
         'thinking': thinking,
         'alternatives': alternatives,
         'explanation': explanation,

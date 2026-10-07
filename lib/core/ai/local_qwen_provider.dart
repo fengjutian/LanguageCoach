@@ -217,13 +217,15 @@ class LocalQwenProvider implements LlmProvider {
           ' the target language for this turn.')
       ..writeln(
           'Always teach the user, even when their input is only one word, name, or place.')
-      ..writeln('Return exactly two sections in this format:')
+      ..writeln('Return exactly three sections in this format:')
       ..writeln('<ANSWER>')
       ..writeln('A brief, natural answer in the target language.')
+      ..writeln('<CHINESE_TRANSLATION>')
+      ..writeln('A complete Simplified-Chinese translation of the answer.')
       ..writeln('<EXPLANATION>')
       ..writeln(
-          'A useful explanation in the user\'s language. For a word or place, include its meaning, pronunciation or transliteration, and a usage note.')
-      ..writeln('Never leave either section empty.');
+          'A useful explanation in Simplified Chinese. For a word or place, include its meaning, pronunciation or transliteration, and a usage note.')
+      ..writeln('Never leave any section empty.');
     final history = StringBuffer();
     for (final msg in context) {
       // User turns keep their text in `sourceText` and have a null
@@ -266,6 +268,7 @@ class LocalQwenProvider implements LlmProvider {
       sourceLanguage: 'auto',
       targetLanguage: request.targetLanguage.code,
       primary: answer,
+      chineseTranslation: sections.chineseTranslation,
       thinking: extraction.thinking,
       alternatives: const <String>[],
       explanation: sections.explanation,
@@ -291,20 +294,29 @@ class LocalQwenProvider implements LlmProvider {
 
   _TeachingSections _splitTeachingSections(String text) {
     const answerMarker = '<ANSWER>';
+    const translationMarker = '<CHINESE_TRANSLATION>';
     const explanationMarker = '<EXPLANATION>';
+    final translationAt = text.indexOf(translationMarker);
     final explanationAt = text.indexOf(explanationMarker);
-    if (explanationAt < 0) {
+    if (translationAt < 0 || explanationAt < 0 || explanationAt < translationAt) {
       return _TeachingSections(
         text.replaceFirst(answerMarker, '').trim(),
+        '',
         '本地模型没有返回教学解释。你可以点击重新生成，或直接追问“请解释这个表达”。',
       );
     }
-    final answer =
-        text.substring(0, explanationAt).replaceFirst(answerMarker, '').trim();
+    final answer = text
+        .substring(0, translationAt)
+        .replaceFirst(answerMarker, '')
+        .trim();
+    final chineseTranslation = text
+        .substring(translationAt + translationMarker.length, explanationAt)
+        .trim();
     final explanation =
         text.substring(explanationAt + explanationMarker.length).trim();
     return _TeachingSections(
       answer.isEmpty ? text.trim() : answer,
+      chineseTranslation,
       explanation.isEmpty
           ? '本地模型没有返回教学解释。你可以点击重新生成，或直接追问“请解释这个表达”。'
           : explanation,
@@ -488,8 +500,13 @@ class _ThinkingSplit {
 }
 
 class _TeachingSections {
-  const _TeachingSections(this.answer, this.explanation);
+  const _TeachingSections(
+    this.answer,
+    this.chineseTranslation,
+    this.explanation,
+  );
 
   final String answer;
+  final String chineseTranslation;
   final String explanation;
 }

@@ -2,6 +2,22 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:language_coach/core/models/chat_models.dart';
 
 void main() {
+  test('CoachResponse preserves the Simplified-Chinese translation', () {
+    final response = CoachResponse.fromJson(<String, Object?>{
+      'intent': 'conversation',
+      'targetLanguage': 'ja',
+      'primary': '今日は雨です。',
+      'chineseTranslation': '今天下雨。',
+      'explanation': '日语说明',
+    });
+
+    expect(response.chineseTranslation, '今天下雨。');
+    expect(
+      CoachResponse.fromJson(response.toJson()).chineseTranslation,
+      '今天下雨。',
+    );
+  });
+
   group('CoachResponse.fromJson', () {
     test('round-trips a canonical payload', () {
       const json = <String, Object?>{
