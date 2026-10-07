@@ -214,16 +214,14 @@ void main() {
       final provider =
           LocalQwenProvider(bridge: bridge, modelId: qwen3Llm06B.id);
       final received = <LlmEvent>[];
-      final sub = provider
-          .generateStream(
-            const CoachRequest(
-              text: '南京',
-              targetLanguage: CoachLanguage.english,
-              intent: CoachIntent.conversation,
-            ),
-            const <ChatMessage>[],
-          )
-          .listen(received.add);
+      final sub = provider.generateStream(
+        const CoachRequest(
+          text: '南京',
+          targetLanguage: CoachLanguage.english,
+          intent: CoachIntent.conversation,
+        ),
+        const <ChatMessage>[],
+      ).listen(received.add);
       addTearDown(() => _ignoreFuture(sub.cancel()));
       await pumpMicrotasks();
 
@@ -289,16 +287,14 @@ void main() {
 
       final received = <LlmEvent>[];
       final done = Completer<void>();
-      final sub = provider
-          .generateStream(
-            CoachRequest(
-              text: 'hello',
-              targetLanguage: CoachLanguage.english,
-              intent: CoachIntent.conversation,
-            ),
-            const <ChatMessage>[],
-          )
-          .listen(received.add, onDone: done.complete);
+      final sub = provider.generateStream(
+        CoachRequest(
+          text: 'hello',
+          targetLanguage: CoachLanguage.english,
+          intent: CoachIntent.conversation,
+        ),
+        const <ChatMessage>[],
+      ).listen(received.add, onDone: done.complete);
       addTearDown(() => _ignoreFuture(sub.cancel()));
 
       await done.future.timeout(const Duration(seconds: 5));
@@ -328,8 +324,7 @@ void main() {
       // Let the provider's run() finish setting up the session.
       await pumpMicrotasks();
       expect(bridge.methodCalls.last, startsWith('startLlmGeneration:'));
-      final sessionId =
-          bridge.methodCalls.last.split(':')[1].split(':')[0];
+      final sessionId = bridge.methodCalls.last.split(':')[1].split(':')[0];
 
       bridge.emitLlmToken(sessionId, 'Hel', 0);
       bridge.emitLlmToken(sessionId, 'lo', 1);
@@ -357,16 +352,14 @@ void main() {
         modelId: qwen3Llm06B.id,
       );
       final received = <LlmEvent>[];
-      await provider
-          .generateStream(
-            const CoachRequest(
-              text: 'hello',
-              targetLanguage: CoachLanguage.english,
-              intent: CoachIntent.conversation,
-            ),
-            const <ChatMessage>[],
-          )
-          .forEach(received.add);
+      await provider.generateStream(
+        const CoachRequest(
+          text: 'hello',
+          targetLanguage: CoachLanguage.english,
+          intent: CoachIntent.conversation,
+        ),
+        const <ChatMessage>[],
+      ).forEach(received.add);
       expect(received, hasLength(1));
       final err = received.single as LlmEventError;
       expect(err.error.message, contains('未加载'));
@@ -391,8 +384,7 @@ void main() {
       addTearDown(() => _ignoreFuture(sub.cancel()));
 
       await pumpMicrotasks();
-      final sessionId =
-          bridge.methodCalls.last.split(':')[1].split(':')[0];
+      final sessionId = bridge.methodCalls.last.split(':')[1].split(':')[0];
 
       bridge.emitLlmToken(sessionId, 'Hel', 0);
       bridge.emitLlmError(sessionId, 'native failure');
@@ -420,8 +412,7 @@ void main() {
       );
       final sub = stream.listen((_) {});
       await pumpMicrotasks();
-      final sessionId =
-          bridge.methodCalls.last.split(':')[1].split(':')[0];
+      final sessionId = bridge.methodCalls.last.split(':')[1].split(':')[0];
 
       await sub.cancel();
       await pumpMicrotasks();
@@ -429,7 +420,8 @@ void main() {
       expect(bridge.methodCalls, contains('cancelLlmGeneration:$sessionId'));
     });
 
-    test('multi-sentence text gets split + keyword extractor surfaces '
+    test(
+        'multi-sentence text gets split + keyword extractor surfaces '
         'recurring vocabulary', () async {
       final bridge = _ScriptedBridge();
       final provider = LocalQwenProvider(
@@ -450,8 +442,7 @@ void main() {
       addTearDown(() => _ignoreFuture(sub.cancel()));
 
       await pumpMicrotasks();
-      final sessionId =
-          bridge.methodCalls.last.split(':')[1].split(':')[0];
+      final sessionId = bridge.methodCalls.last.split(':')[1].split(':')[0];
 
       bridge.emitLlmToken(sessionId, 'Coffee shops ', 0);
       bridge.emitLlmToken(sessionId, 'in Paris ', 1);

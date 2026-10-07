@@ -143,8 +143,7 @@ class LocalQwenProvider implements LlmProvider {
           case 'LLM_ERROR':
             closed = true;
             stopWatchdog();
-            final message =
-                (ev.payload['message'] as String?) ?? '本地模型推理失败';
+            final message = (ev.payload['message'] as String?) ?? '本地模型推理失败';
             controller.add(LlmEventError(
               LlmError(LlmErrorKind.unknown, message),
             ));
@@ -212,12 +211,14 @@ class LocalQwenProvider implements LlmProvider {
     final sys = StringBuffer()
       ..writeln('You are a friendly language tutor.')
       ..writeln('Target language: ${request.targetLanguage.code}')
-      ..writeln('Always teach the user, even when their input is only one word, name, or place.')
+      ..writeln(
+          'Always teach the user, even when their input is only one word, name, or place.')
       ..writeln('Return exactly two sections in this format:')
       ..writeln('<ANSWER>')
       ..writeln('A brief, natural answer in the target language.')
       ..writeln('<EXPLANATION>')
-      ..writeln('A useful explanation in the user\'s language. For a word or place, include its meaning, pronunciation or transliteration, and a usage note.')
+      ..writeln(
+          'A useful explanation in the user\'s language. For a word or place, include its meaning, pronunciation or transliteration, and a usage note.')
       ..writeln('Never leave either section empty.');
     final history = StringBuffer();
     for (final msg in context) {
@@ -289,13 +290,10 @@ class LocalQwenProvider implements LlmProvider {
         '本地模型没有返回教学解释。你可以点击重新生成，或直接追问“请解释这个表达”。',
       );
     }
-    final answer = text
-        .substring(0, explanationAt)
-        .replaceFirst(answerMarker, '')
-        .trim();
-    final explanation = text
-        .substring(explanationAt + explanationMarker.length)
-        .trim();
+    final answer =
+        text.substring(0, explanationAt).replaceFirst(answerMarker, '').trim();
+    final explanation =
+        text.substring(explanationAt + explanationMarker.length).trim();
     return _TeachingSections(
       answer.isEmpty ? text.trim() : answer,
       explanation.isEmpty
@@ -355,10 +353,7 @@ class LocalQwenProvider implements LlmProvider {
         if (byCount != 0) return byCount;
         return a.key.compareTo(b.key);
       });
-    return ranked
-        .take(max)
-        .map((e) => e.key)
-        .toList(growable: false);
+    return ranked.take(max).map((e) => e.key).toList(growable: false);
   }
 
   String _langHint(String text) {
@@ -409,17 +404,69 @@ class LocalQwenProvider implements LlmProvider {
       // + generic connectives as stopwords. The tokeniser treats every
       // CJK character as a token, so this matters more than for latin.
       return const <String>{
-        '的', '了', '是', '在', '我', '你', '他', '她', '它',
-        '和', '与', '或', '也', '都', '就', '还', '要', '把',
-        '不', '没', '有', '对', '这', '那', '一个', '一些',
+        '的',
+        '了',
+        '是',
+        '在',
+        '我',
+        '你',
+        '他',
+        '她',
+        '它',
+        '和',
+        '与',
+        '或',
+        '也',
+        '都',
+        '就',
+        '还',
+        '要',
+        '把',
+        '不',
+        '没',
+        '有',
+        '对',
+        '这',
+        '那',
+        '一个',
+        '一些',
       };
     }
     return const <String>{
-      'the', 'a', 'an', 'and', 'or', 'but', 'if', 'then',
-      'is', 'are', 'was', 'were', 'be', 'been', 'being',
-      'i', 'you', 'he', 'she', 'it', 'we', 'they',
-      'to', 'of', 'in', 'on', 'at', 'for', 'with', 'by',
-      'this', 'that', 'these', 'those',
+      'the',
+      'a',
+      'an',
+      'and',
+      'or',
+      'but',
+      'if',
+      'then',
+      'is',
+      'are',
+      'was',
+      'were',
+      'be',
+      'been',
+      'being',
+      'i',
+      'you',
+      'he',
+      'she',
+      'it',
+      'we',
+      'they',
+      'to',
+      'of',
+      'in',
+      'on',
+      'at',
+      'for',
+      'with',
+      'by',
+      'this',
+      'that',
+      'these',
+      'those',
     };
   }
 }

@@ -33,8 +33,7 @@ class _StreamingAdapter implements HttpClientAdapter {
         await requestStream?.expand((chunk) => chunk).toList() ?? const <int>[];
     return ResponseBody(
       Stream<Uint8List>.fromIterable(
-        (chunks ?? <List<int>>[utf8.encode(payload)])
-            .map(Uint8List.fromList),
+        (chunks ?? <List<int>>[utf8.encode(payload)]).map(Uint8List.fromList),
       ),
       200,
       headers: {
