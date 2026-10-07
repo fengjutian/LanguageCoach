@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/ui/app_toast.dart';
-import '../settings/application/settings_controller.dart';
+import '../chat/application/chat_controller.dart';
+import '../home/application/home_navigation.dart';
 import 'application/conversation_export_providers.dart';
 import 'application/history_controller.dart';
 
@@ -41,19 +42,22 @@ class _HistoryPageState extends ConsumerState<HistoryPage> {
       ),
     );
     if (confirmed == true) {
-      await ref.read(historyControllerProvider.notifier).deleteAll();
-      ref.read(settingsControllerProvider.notifier).setLastConversationId(null);
+      await deleteAllConversationsAndSync(ref);
       ref.read(historySearchQueryProvider.notifier).state = '';
       _searchController.clear();
     }
   }
 
+  /// Resume a conversation: load it into the chat controller *and* reveal the
+  /// Chat tab. Previously this only rewrote `lastConversationId` and told the
+  /// user to go back by hand — and the chat page never re-read it.
   Future<void> _openConversation(String conversationId) async {
-    ref
-        .read(settingsControllerProvider.notifier)
-        .setLastConversationId(conversationId);
+    await ref
+        .read(chatControllerProvider.notifier)
+        .openConversation(conversationId);
     if (!mounted) return;
-    AppToast.success(context, '已恢复该对话。请回到对话页查看。');
+    showChatTab(ref);
+    AppToast.success(context, '已恢复该对话');
   }
 
   Future<void> _exportConversation(String conversationId) async {
@@ -152,9 +156,7 @@ class _HistoryPageState extends ConsumerState<HistoryPage> {
                   ),
                   direction: DismissDirection.endToStart,
                   onDismissed: (_) {
-                    ref
-                        .read(historyControllerProvider.notifier)
-                        .deleteConversation(item.id);
+                    deleteConversationAndSync(ref, item.id);
                   },
                   child: ListTile(
                     leading: const Icon(Icons.chat_bubble_outline),
@@ -218,9 +220,7 @@ class _HistoryPageState extends ConsumerState<HistoryPage> {
       case _HistoryItemAction.export:
         await _exportConversation(conversationId);
       case _HistoryItemAction.delete:
-        await ref
-            .read(historyControllerProvider.notifier)
-            .deleteConversation(conversationId);
+        await deleteConversationAndSync(ref, conversationId);
     }
   }
 }

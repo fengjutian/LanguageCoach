@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:language_coach/core/ai/conversation_repository.dart';
 import 'package:language_coach/core/models/app_settings.dart';
 import 'package:language_coach/core/models/chat_models.dart';
+import 'package:language_coach/core/models/conversation.dart';
 import 'package:language_coach/features/history/application/conversation_export_service.dart';
 import 'package:language_coach/features/history/application/conversation_exporter.dart';
 
@@ -32,7 +33,9 @@ void main() {
               primary: "It's raining today.",
               alternatives: const ["It's rainy today."],
               explanation: '描述当前天气的日常表达。',
-              sentences: const [CoachSentence(id: 's1', text: "It's raining today.")],
+              sentences: const [
+                CoachSentence(id: 's1', text: "It's raining today.")
+              ],
               keywords: const ['rain', 'today'],
             ),
           ),
@@ -89,15 +92,17 @@ void main() {
     test('export writes a file and asks the share service to surface it',
         () async {
       repo.putConversation('c1', title: '天气会话');
-      repo.putMessage('c1', ChatMessage(
-        id: 'u1',
-        role: MessageRole.user,
-        createdAt: DateTime(2026, 10, 2),
-        sourceText: 'hi',
-      ));
+      repo.putMessage(
+          'c1',
+          ChatMessage(
+            id: 'u1',
+            role: MessageRole.user,
+            createdAt: DateTime(2026, 10, 2),
+            sourceText: 'hi',
+          ));
 
-      final path = await service.export('c1',
-          now: DateTime(2026, 10, 2, 14, 30));
+      final path =
+          await service.export('c1', now: DateTime(2026, 10, 2, 14, 30));
 
       expect(path, isNotEmpty);
       expect(share.lastPath, path);
@@ -158,11 +163,32 @@ class _FakeRepository implements ConversationRepository {
   }
 
   @override
-  Future<({String id, String title, DateTime updatedAt})?> findById(
-      String conversationId) async {
+  Future<Conversation?> getConversation(String conversationId) async {
     final meta = _meta[conversationId];
     if (meta == null) return null;
-    return (id: meta.id, title: meta.title, updatedAt: meta.updatedAt);
+    return Conversation(
+      id: meta.id,
+      title: meta.title,
+      preferredLanguage: CoachLanguage.english,
+      targetLanguage: CoachLanguage.english,
+      createdAt: meta.updatedAt,
+      updatedAt: meta.updatedAt,
+    );
+  }
+
+  @override
+  Future<void> updateConversationLanguage(
+    String conversationId,
+    CoachLanguage language,
+  ) async {}
+
+  @override
+  Future<void> replaceAssistantTurn({
+    required String conversationId,
+    required String userMessageId,
+    required ChatMessage assistant,
+  }) async {
+    putMessage(conversationId, assistant);
   }
 
   @override

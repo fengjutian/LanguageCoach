@@ -87,8 +87,10 @@ void main() {
     final minimax = _CountingProvider('MiniMax');
     final deepSeek = _CountingProvider('DeepSeek');
     final engine = _engineWith(minimax, deepSeek, _CountingProvider('Qwen'));
-    await _drain(engine.replyStream('为什么这里用 raining？'));
-    await _drain(engine.replyStream('帮我纠正这句话'));
+    await _drain(engine.replyStream('为什么这里用 raining？',
+        conversationLanguage: CoachLanguage.english));
+    await _drain(engine.replyStream('帮我纠正这句话',
+        conversationLanguage: CoachLanguage.english));
     expect(deepSeek.calls, 2);
     expect(minimax.calls, 0);
   });
@@ -98,8 +100,10 @@ void main() {
     final minimax = _CountingProvider('MiniMax');
     final deepSeek = _CountingProvider('DeepSeek');
     final engine = _engineWith(minimax, deepSeek, _CountingProvider('Qwen'));
-    await _drain(engine.replyStream('和我模拟酒店入住'));
-    await _drain(engine.replyStream('怎么说谢谢'));
+    await _drain(engine.replyStream('和我模拟酒店入住',
+        conversationLanguage: CoachLanguage.english));
+    await _drain(engine.replyStream('怎么说谢谢',
+        conversationLanguage: CoachLanguage.english));
     expect(minimax.calls, 2);
     expect(deepSeek.calls, 0);
   });
@@ -119,7 +123,8 @@ void main() {
         localQwen: localQwen,
       ),
     );
-    await _drain(engine.replyStream('为什么这里用 raining？'));
+    await _drain(engine.replyStream('为什么这里用 raining？',
+        conversationLanguage: CoachLanguage.english));
     expect(deepSeek.calls, 1);
     expect(minimax.calls, 0);
     expect(localQwen.calls, 0);
@@ -136,7 +141,8 @@ void main() {
       ),
     );
     final events = <LlmEvent>[];
-    await for (final e in engine.replyStream('test')) {
+    await for (final e in engine.replyStream('test',
+        conversationLanguage: CoachLanguage.english)) {
       events.add(e);
     }
     expect(events, isNotEmpty);

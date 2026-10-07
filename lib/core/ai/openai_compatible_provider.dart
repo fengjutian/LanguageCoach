@@ -54,6 +54,9 @@ JSON object (no prose, no markdown fences) matching this schema:
 
 Teaching requirements:
 - Never leave "primary" or "explanation" empty.
+- "primary" and "sentences" MUST be written in the required target language
+  named in the request metadata. The conversation history may be in another
+  language; history NEVER overrides the metadata for the current turn.
 - Treat a short word, name, or place (for example, "南京") as a vocabulary
   question: give its natural target-language form in "primary", then explain
   its meaning, pronunciation/transliteration, and one useful usage note in
@@ -168,7 +171,13 @@ Teaching requirements:
       targetLanguage: request.targetLanguage,
       thinkingFromCaller: thinkingBuffer.toString(),
     );
-    final response0 = _ensureTeachingExplanation(parsedResponse, request);
+    // The parser already ignores the model's own `targetLanguage` field; this
+    // is the belt-and-braces guarantee that whatever the payload claimed, the
+    // turn answers in the language the client resolved.
+    final response0 = _ensureTeachingExplanation(
+      parsedResponse.copyWith(targetLanguage: request.targetLanguage.code),
+      request,
+    );
     final message = ChatMessage(
       id: DateTime.now().microsecondsSinceEpoch.toString(),
       role: MessageRole.assistant,
@@ -179,14 +188,20 @@ Teaching requirements:
     yield LlmEventComplete(response0, message);
   }
 
-  String _composeUserPrompt(CoachRequest request) => '''
+  String _composeUserPrompt(CoachRequest request) {
+    final switchNotice = request.languageChangedDuringConversation
+        ? '- language switch: from this turn on, answer in the required target'
+            ' language even if the earlier messages used another one\n'
+        : '';
+    return '''
 Learner input: ${request.text}
 
 Request metadata (follow this; do not copy it into the answer):
 - detected intent: ${request.intent.name}
-- required target language: ${request.targetLanguage.code}
+- required target language: ${request.targetLanguage.code} (${request.targetLanguage.label})
 - explanation language: the language of the learner input
-''';
+$switchNotice''';
+  }
 
   CoachResponse _ensureTeachingExplanation(
     CoachResponse response,

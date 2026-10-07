@@ -1,10 +1,13 @@
 import 'package:language_coach/core/models/app_settings.dart';
 import 'package:language_coach/core/models/chat_models.dart';
+import 'package:language_coach/core/models/conversation.dart';
 
-/// Storage contract for [ChatMessage] persistence. Implementations land in
-/// P0-3 (SQLite-backed). Tests inject an in-memory fake; widgets never
-/// construct the implementation directly.
+/// Storage contract for conversation + [ChatMessage] persistence. The chat
+/// controller owns one conversation id at a time and uses these primitives to
+/// load, extend and regenerate turns; widgets never touch the repository.
 abstract interface class ConversationRepository {
+  /// Idempotent create-or-repair. Kept for the first-message path where the
+  /// controller already has a lazy draft id it wants materialised.
   Future<void> ensureConversation(
     String id, {
     String? title,
@@ -15,8 +18,7 @@ abstract interface class ConversationRepository {
 
   Future<void> updateTitle(String conversationId, String title);
 
-  Future<({String id, String title, DateTime updatedAt})?> findById(
-      String conversationId);
+  Future<Conversation?> getConversation(String conversationId);
 
   Future<List<ChatMessage>> messagesFor(String conversationId);
 
@@ -24,6 +26,24 @@ abstract interface class ConversationRepository {
     required String conversationId,
     required ChatMessage message,
   });
+
+  /// Drop every message that belongs to the assistant turn following
+  /// [userMessageId], then insert [assistant] as the replacement. Regenerate
+  /// must not grow the transcript — the old failed/partial answer and its
+  /// sentences have to disappear from SQLite as well as from the UI.
+  Future<void> replaceAssistantTurn({
+    required String conversationId,
+    required String userMessageId,
+    required ChatMessage assistant,
+  });
+
+  /// Update only the per-conversation target language. Must not touch
+  /// `created_at` nor bump `updated_at` into a reorder storm — callers refresh
+  /// the history list explicitly instead.
+  Future<void> updateConversationLanguage(
+    String conversationId,
+    CoachLanguage language,
+  );
 
   Future<void> deleteConversation(String conversationId);
 
@@ -34,7 +54,7 @@ abstract interface class ConversationRepository {
 }
 
 /// Read/write contract for [AppSettings]. Concrete implementation reads from
-/// SQLite in P0-3 and currently lives as in-memory state via Riverpod.
+/// SQLite and is written by [SettingsController] through a serialised queue.
 abstract interface class SettingsRepository {
   Future<Map<Object?, Object?>> loadRaw();
 

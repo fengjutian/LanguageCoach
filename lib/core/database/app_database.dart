@@ -9,7 +9,7 @@ import 'package:sqflite/sqflite.dart';
 class AppDatabase {
   AppDatabase._(this._db);
 
-  static const int schemaVersion = 2;
+  static const int schemaVersion = 3;
 
   final Database _db;
   Database get db => _db;
@@ -173,5 +173,10 @@ final List<MigrationStep> migrations = <MigrationStep>[
     )
     ''',
     'CREATE INDEX idx_practice_attempts_created ON practice_attempts(created_at DESC)',
+  ]),
+  MigrationStep(3, <String>[
+    // Assistant turn lifecycle. Existing rows are terminal-complete, so the
+    // default backfills them without a table rebuild.
+    "ALTER TABLE messages ADD COLUMN status TEXT NOT NULL DEFAULT 'completed'",
   ]),
 ];

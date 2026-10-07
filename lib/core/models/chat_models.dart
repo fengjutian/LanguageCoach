@@ -21,6 +21,59 @@ enum CoachIntent {
 
 enum MessageRole { user, assistant, error }
 
+/// Lifecycle of an assistant turn. Only [completed] messages are allowed into
+/// the request context — a placeholder, a truncated cancel or a failed turn
+/// would otherwise be replayed to the model on the next send.
+enum ChatMessageStatus {
+  /// Still receiving tokens. Excluded from context.
+  streaming,
+
+  /// Terminal, playable, persisted. The only status that enters context.
+  completed,
+
+  /// Provider or transport failure. Kept visible as an error bubble.
+  failed,
+
+  /// User stopped generation. Whatever text arrived is kept but the turn is
+  /// not fed back to the model.
+  cancelled,
+}
+
+/// Lightweight script check used to flag "asked for Japanese, answered in
+/// English" without shipping a full language detector. Returns `true` when
+/// the text clearly cannot be the requested language.
+bool looksLikeLanguageMismatch(String text, String targetCode) {
+  final trimmed = text.trim();
+  if (trimmed.isEmpty) return false;
+  final code = targetCode.toLowerCase();
+  final hasKana = RegExp(r'[\u3040-\u30ff]').hasMatch(trimmed);
+  final hasHangul = RegExp(r'[\uac00-\ud7af]').hasMatch(trimmed);
+  final hasHan = RegExp(r'[\u4e00-\u9fff]').hasMatch(trimmed);
+  final hasCyrillic = RegExp(r'[\u0400-\u04ff]').hasMatch(trimmed);
+  final latinChars = RegExp(r'[A-Za-z]').allMatches(trimmed).length;
+  final latinRatio = latinChars / trimmed.length;
+
+  switch (code) {
+    case 'ja':
+      // Japanese without a single kana that is overwhelmingly latin is an
+      // English (or romanised) answer, not Japanese.
+      return !hasKana && !hasHan && latinRatio > 0.5;
+    case 'ko':
+      return !hasHangul && !hasHan && latinRatio > 0.5;
+    case 'zh-cn':
+    case 'zh':
+      return !hasHan && latinRatio > 0.7;
+    case 'ru':
+      return !hasCyrillic && latinRatio > 0.5;
+    case 'en':
+      // Asking for English and getting pure CJK / kana / hangul / Cyrillic:
+      // a romanisation or an explanation leaked into the answer slot.
+      return latinChars == 0 && (hasHan || hasKana || hasHangul || hasCyrillic);
+    default:
+      return false;
+  }
+}
+
 /// One sentence inside a [CoachResponse]. Stable across conversation turns so
 /// the UI can keep references after a re-render or audio cache hit.
 class CoachSentence {
@@ -174,7 +227,9 @@ List<String> _readStringList(Object? raw) {
 List<String> _readKeywords(Map<Object?, Object?> raw) {
   final flat = _readStringList(raw['keywords']);
   final learning = raw['learning'];
-  final nested = learning is Map ? _readStringList(learning['keywords']) : const <String>[];
+  final nested = learning is Map
+      ? _readStringList(learning['keywords'])
+      : const <String>[];
   if (flat.isEmpty) return nested;
   if (nested.isEmpty) return flat;
   return List<String>.unmodifiable(<String>{...flat, ...nested});
@@ -188,6 +243,8 @@ class ChatMessage {
     this.sourceText,
     this.response,
     this.model,
+    this.status = ChatMessageStatus.completed,
+    this.languageMismatch = false,
   });
 
   final String id;
@@ -197,6 +254,20 @@ class ChatMessage {
   final CoachResponse? response;
   final String? model;
 
+  /// Assistant turns start as [ChatMessageStatus.streaming] and settle on
+  /// complete / fail / cancel. User messages are always [completed].
+  final ChatMessageStatus status;
+
+  /// Set when the script check found the answer is not in the requested
+  /// target language. Drives the "语言不符" hint + regenerate affordance.
+  final bool languageMismatch;
+
+  bool get isContextEligible =>
+      status == ChatMessageStatus.completed &&
+      role != MessageRole.error &&
+      ((response?.primary ?? '').trim().isNotEmpty ||
+          (sourceText ?? '').trim().isNotEmpty);
+
   ChatMessage copyWith({
     String? id,
     MessageRole? role,
@@ -204,6 +275,8 @@ class ChatMessage {
     String? sourceText,
     CoachResponse? response,
     String? model,
+    ChatMessageStatus? status,
+    bool? languageMismatch,
   }) {
     return ChatMessage(
       id: id ?? this.id,
@@ -212,6 +285,8 @@ class ChatMessage {
       sourceText: sourceText ?? this.sourceText,
       response: response ?? this.response,
       model: model ?? this.model,
+      status: status ?? this.status,
+      languageMismatch: languageMismatch ?? this.languageMismatch,
     );
   }
 
@@ -231,6 +306,12 @@ class ChatMessage {
       response = CoachResponse.fromJson(responseRaw.cast<Object?, Object?>());
     }
 
+    final statusRaw = raw['status']?.toString();
+    final status = ChatMessageStatus.values.firstWhere(
+      (s) => s.name == statusRaw,
+      orElse: () => ChatMessageStatus.completed,
+    );
+
     return ChatMessage(
       id: raw['id']?.toString() ?? 'm_${DateTime.now().microsecondsSinceEpoch}',
       role: role,
@@ -238,6 +319,8 @@ class ChatMessage {
       sourceText: raw['sourceText']?.toString(),
       response: response,
       model: raw['model']?.toString(),
+      status: status,
+      languageMismatch: raw['languageMismatch'] == true,
     );
   }
 
@@ -248,5 +331,7 @@ class ChatMessage {
         'sourceText': sourceText,
         'response': response?.toJson(),
         'model': model,
+        'status': status.name,
+        'languageMismatch': languageMismatch,
       };
 }

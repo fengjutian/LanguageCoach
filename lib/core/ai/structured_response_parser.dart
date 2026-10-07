@@ -81,8 +81,12 @@ class StructuredResponseParser {
 
     final merged = <String, Object?>{
       ...parsed,
-      'intent': parsed['intent'] ?? intent.name,
-      'targetLanguage': parsed['targetLanguage'] ?? targetLanguage.code,
+      // The client already resolved intent and the target language *before*
+      // the request went out. Letting the model echo its own `intent` /
+      // `targetLanguage` field means a hallucinated value silently reroutes
+      // the TTS voice and the answer label, so the request wins outright.
+      'intent': intent.name,
+      'targetLanguage': targetLanguage.code,
       'thinking': resolveThinking(parsed),
     };
     return CoachResponse.fromJson(merged);

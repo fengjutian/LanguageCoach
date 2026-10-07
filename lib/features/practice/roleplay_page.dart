@@ -4,10 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../core/ai/conversation_engine.dart';
 import '../../core/ai/llm_event.dart';
 import '../../core/models/chat_models.dart';
 import '../chat/application/conversation_providers.dart';
 import '../chat/application/speech_session_controller.dart';
+import '../settings/application/settings_controller.dart';
 
 class RoleplayScenario {
   const RoleplayScenario({
@@ -351,7 +353,12 @@ class _RoleplayPageState extends ConsumerState<RoleplayPage> {
     await _subscription?.cancel();
     _subscription = ref
         .read(conversationEngineProvider)
-        .replyStream(prompt, context: List.unmodifiable(_messages))
+        .replyStream(
+          prompt,
+          conversationLanguage:
+              ref.read(settingsControllerProvider).preferredLanguage,
+          context: ConversationEngine.usableContext(_messages),
+        )
         .listen(_onEvent,
             onError: (_) => _completeWithFallback(),
             onDone: () {
@@ -448,7 +455,11 @@ $transcript
     var generated = '';
     try {
       await for (final event
-          in ref.read(conversationEngineProvider).replyStream(prompt)) {
+          in ref.read(conversationEngineProvider).replyStream(
+                prompt,
+                conversationLanguage:
+                    ref.read(settingsControllerProvider).preferredLanguage,
+              )) {
         switch (event) {
           case LlmEventDelta(:final text):
             generated += text;

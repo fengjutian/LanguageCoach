@@ -155,18 +155,53 @@ ProviderContainer _container(_ScriptedBridge bridge) {
 }
 
 void main() {
-  test('resolvedAsrLanguageProvider falls back to coach target', () {
+  test('resolvedAsrLanguageProvider defaults to auto, not the target language',
+      () {
     final container = _container(_ScriptedBridge());
     addTearDown(container.dispose);
-    // Explicit ASR input language is null → use the coach preference.
+    // Dictation is what the user *says*; the target language is what we answer
+    // in. Defaulting to the target made a learner who switched to Japanese get
+    // their Mandarin question transcribed by a Japanese model.
+    expect(container.read(resolvedAsrLanguageProvider), 'auto');
+  });
+
+  test('an explicit ASR input language wins over the auto default', () {
+    final container = _container(_ScriptedBridge());
+    addTearDown(container.dispose);
+    container.read(asrInputLanguageProvider.notifier).set('zh-CN');
     expect(container.read(resolvedAsrLanguageProvider), 'zh-CN');
+  });
+
+  test('ensureEngineReady routes auto detection to the system recognizer',
+      () async {
+    final bridge = _ScriptedBridge();
+    final container = _container(bridge);
+    addTearDown(container.dispose);
+    container
+        .read(asrEngineChoiceProvider.notifier)
+        .set(AsrEngineChoice.sherpaOnnx);
+
+    final controller = container.read(speechSessionControllerProvider.notifier);
+    final ready = await controller.ensureEngineReady();
+
+    expect(ready, isTrue);
+    expect(
+      bridge.methodCalls.any((c) => c.startsWith('loadAsrProfile:')),
+      isFalse,
+      reason: 'single-language sherpa profiles cannot satisfy `auto`',
+    );
   });
 
   test('ensureEngineReady loads sherpa-onnx profile when chosen', () async {
     final bridge = _ScriptedBridge();
     final container = _container(bridge);
     addTearDown(container.dispose);
-    container.read(asrEngineChoiceProvider.notifier).set(AsrEngineChoice.sherpaOnnx);
+    container
+        .read(asrEngineChoiceProvider.notifier)
+        .set(AsrEngineChoice.sherpaOnnx);
+    // A concrete input language is required for the bundled single-language
+    // sherpa profiles.
+    container.read(asrInputLanguageProvider.notifier).set('zh-CN');
     final controller = container.read(speechSessionControllerProvider.notifier);
     final ready = await controller.ensureEngineReady();
     expect(ready, isTrue);
@@ -184,7 +219,9 @@ void main() {
     final bridge = _ScriptedBridge();
     final container = _container(bridge);
     addTearDown(container.dispose);
-    container.read(asrEngineChoiceProvider.notifier).set(AsrEngineChoice.sherpaOnnx);
+    container
+        .read(asrEngineChoiceProvider.notifier)
+        .set(AsrEngineChoice.sherpaOnnx);
     final controller = container.read(speechSessionControllerProvider.notifier);
     await controller.ensureEngineReady();
     await controller.start();

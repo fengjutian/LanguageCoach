@@ -94,7 +94,7 @@ void main() {
       final repo = InMemoryConversationRepository();
       await repo.ensureConversation('c1', title: 'default');
       await repo.updateTitle('c1', 'manual title');
-      final meta = await repo.findById('c1');
+      final meta = await repo.getConversation('c1');
       expect(meta?.title, 'manual title');
     });
   });

@@ -6,6 +6,7 @@ import '../../core/ai/conversation_repository.dart';
 import '../../core/database/app_database.dart';
 import '../../core/models/app_settings.dart';
 import '../../core/models/chat_models.dart';
+import '../../core/models/conversation.dart';
 
 /// SQLite-backed conversation repository. The first version stores
 /// conversations, messages and sentences; cascades ensure deleting a
@@ -42,7 +43,8 @@ class SqliteConversationRepository implements ConversationRepository {
         'created_at': (createdAt ?? DateTime.now()).millisecondsSinceEpoch,
         'updated_at': now,
       });
-    } else if (title != null && _isAutoTitle(existing.first['title'] as String?)) {
+    } else if (title != null &&
+        _isAutoTitle(existing.first['title'] as String?)) {
       // `_defaultTitle()` re-derives the timestamp at call time, so the old
       // `== _defaultTitle()` guard could only match within the same minute
       // of creation — the branch was effectively dead. Match the shape
@@ -72,8 +74,7 @@ class SqliteConversationRepository implements ConversationRepository {
   }
 
   @override
-  Future<({String id, String title, DateTime updatedAt})?> findById(
-      String conversationId) async {
+  Future<Conversation?> getConversation(String conversationId) async {
     final rows = await _db.query(
       'conversations',
       where: 'id = ?',
@@ -82,12 +83,24 @@ class SqliteConversationRepository implements ConversationRepository {
     );
     if (rows.isEmpty) return null;
     final row = rows.first;
-    return (
+    return _toConversation(row);
+  }
+
+  Conversation _toConversation(Map<String, Object?> row) {
+    return Conversation(
       id: row['id'] as String,
       title: row['title'] as String,
+      preferredLanguage: _languageFrom(row['preferred_language']),
+      targetLanguage: _languageFrom(row['target_language']),
+      createdAt: DateTime.fromMillisecondsSinceEpoch(row['created_at'] as int),
       updatedAt: DateTime.fromMillisecondsSinceEpoch(row['updated_at'] as int),
     );
   }
+
+  CoachLanguage _languageFrom(Object? raw) => CoachLanguage.values.firstWhere(
+        (l) => l.name == raw,
+        orElse: () => CoachLanguage.english,
+      );
 
   @override
   Future<List<ChatMessage>> messagesFor(String conversationId) async {
@@ -146,9 +159,19 @@ class SqliteConversationRepository implements ConversationRepository {
               sentencesByMessage[row['id'] as String] ?? response.sentences,
         ),
         model: row['model'] as String?,
+        status: _statusFrom(row['status']),
       );
     }).toList();
   }
+
+  /// `status` was added in schema v3; rows written by an older build (or by a
+  /// test that hand-inserts) have no value, and a missing status must read
+  /// back as terminal-complete rather than as a placeholder.
+  ChatMessageStatus _statusFrom(Object? raw) =>
+      ChatMessageStatus.values.firstWhere(
+        (s) => s.name == raw,
+        orElse: () => ChatMessageStatus.completed,
+      );
 
   @override
   Future<String> appendMessage({
@@ -169,6 +192,7 @@ class SqliteConversationRepository implements ConversationRepository {
               ? null
               : json.encode(message.response!.toJson()),
           'model': message.model,
+          'status': message.status.name,
           'created_at': message.createdAt.millisecondsSinceEpoch,
         },
         conflictAlgorithm: ConflictAlgorithm.replace,
@@ -196,6 +220,105 @@ class SqliteConversationRepository implements ConversationRepository {
       );
     });
     return message.id;
+  }
+
+  @override
+  Future<void> replaceAssistantTurn({
+    required String conversationId,
+    required String userMessageId,
+    required ChatMessage assistant,
+  }) async {
+    await ensureConversation(conversationId);
+    final anchorRows = await _db.rawQuery(
+      'SELECT created_at, rowid FROM messages WHERE id = ? AND conversation_id = ?'
+      ' LIMIT 1',
+      [userMessageId, conversationId],
+    );
+    if (anchorRows.isEmpty) {
+      // Anchor is gone (deleted with its conversation). Fall back to an
+      // append so the regenerate still surfaces instead of vanishing.
+      await appendMessage(conversationId: conversationId, message: assistant);
+      return;
+    }
+    final anchorAt = anchorRows.first['created_at'] as int;
+    final anchorRowId = anchorRows.first['rowid'] as int;
+    final sentences = assistant.response?.sentences ?? const <CoachSentence>[];
+    await _db.transaction((txn) async {
+      // Order by (created_at, rowid), not created_at alone: two messages can
+      // land in the same millisecond, and a plain `created_at > anchor`
+      // delete then takes earlier turns with it. rowid breaks the tie in
+      // insertion order, so only the assistant turn actually following the
+      // anchor is removed.
+      final doomed = await txn.rawQuery(
+        'SELECT id FROM messages WHERE conversation_id = ? '
+        'AND (created_at > ? OR (created_at = ? AND rowid > ?))',
+        [conversationId, anchorAt, anchorAt, anchorRowId],
+      );
+      for (final row in doomed) {
+        // Sentences cascade from their message row, so deleting the stale
+        // assistant turn is enough to drop its audio-index metadata too.
+        await txn.delete(
+          'messages',
+          where: 'id = ?',
+          whereArgs: [row['id']],
+        );
+      }
+      await txn.insert(
+        'messages',
+        <String, Object?>{
+          'id': assistant.id,
+          'conversation_id': conversationId,
+          'role': assistant.role.name,
+          'source_text': assistant.sourceText,
+          'response_json': assistant.response == null
+              ? null
+              : json.encode(assistant.response!.toJson()),
+          'model': assistant.model,
+          'status': assistant.status.name,
+          'created_at': assistant.createdAt.millisecondsSinceEpoch,
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+      for (var i = 0; i < sentences.length; i++) {
+        final s = sentences[i];
+        await txn.insert(
+          'sentences',
+          <String, Object?>{
+            'message_id': assistant.id,
+            'sentence_index': i,
+            'id': s.id,
+            'text': s.text,
+          },
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+      }
+      await txn.update(
+        'conversations',
+        <String, Object?>{
+          'updated_at': DateTime.now().millisecondsSinceEpoch,
+        },
+        where: 'id = ?',
+        whereArgs: [conversationId],
+      );
+    });
+  }
+
+  @override
+  Future<void> updateConversationLanguage(
+    String conversationId,
+    CoachLanguage language,
+  ) async {
+    await _db.update(
+      'conversations',
+      <String, Object?>{
+        'target_language': language.name,
+        // created_at is intentionally untouched; updated_at is bumped so the
+        // conversation keeps its natural "most recent activity" ordering.
+        'updated_at': DateTime.now().millisecondsSinceEpoch,
+      },
+      where: 'id = ?',
+      whereArgs: [conversationId],
+    );
   }
 
   @override

@@ -62,7 +62,7 @@ class ConversationExportService {
   /// file so callers can show a confirmation toast that points back to
   /// the file.
   Future<String> export(String conversationId, {DateTime? now}) async {
-    final meta = await _repository.findById(conversationId);
+    final meta = await _repository.getConversation(conversationId);
     if (meta == null) {
       throw StateError('conversation $conversationId not found');
     }

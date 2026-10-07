@@ -1,6 +1,7 @@
 import 'package:language_coach/core/ai/conversation_repository.dart';
 import 'package:language_coach/core/models/app_settings.dart';
 import 'package:language_coach/core/models/chat_models.dart';
+import 'package:language_coach/core/models/conversation.dart';
 
 /// Test double for [ConversationRepository] that lives entirely in memory.
 /// Used by widget / controller tests so they don't need sqflite_native
@@ -44,15 +45,57 @@ class InMemoryConversationRepository implements ConversationRepository {
   }
 
   @override
-  Future<({String id, String title, DateTime updatedAt})?> findById(
-      String conversationId) async {
+  Future<Conversation?> getConversation(String conversationId) async {
     final c = _conversations[conversationId];
     if (c == null) return null;
-    return (
+    return Conversation(
       id: conversationId,
       title: c.title,
+      preferredLanguage: c.preferredLanguage ?? CoachLanguage.english,
+      targetLanguage: c.targetLanguage ?? CoachLanguage.english,
+      createdAt: c.createdAt,
       updatedAt: c.updatedAt,
     );
+  }
+
+  @override
+  Future<void> updateConversationLanguage(
+    String conversationId,
+    CoachLanguage language,
+  ) async {
+    final c = _conversations[conversationId];
+    if (c == null) return;
+    c.targetLanguage = language;
+    c.updatedAt = DateTime.now();
+  }
+
+  @override
+  Future<void> replaceAssistantTurn({
+    required String conversationId,
+    required String userMessageId,
+    required ChatMessage assistant,
+  }) async {
+    final c = _conversations[conversationId];
+    if (c == null) return;
+    final anchor = c.messages[userMessageId];
+    if (anchor == null) {
+      await appendMessage(conversationId: conversationId, message: assistant);
+      return;
+    }
+    // Compare by insertion index, not timestamp: two messages can share the
+    // same millisecond, and a timestamp comparison would then delete earlier
+    // turns along with the one being replaced.
+    final order = c.messages.keys.toList();
+    final anchorIndex = order.indexOf(userMessageId);
+    final stale = order
+        .skip(anchorIndex + 1)
+        .where((id) => c.messages[id]!.role == MessageRole.assistant)
+        .toList();
+    for (final id in stale) {
+      c.messages.remove(id);
+    }
+    c.messages[assistant.id] = assistant;
+    c.updatedAt = DateTime.now();
   }
 
   @override
@@ -131,8 +174,8 @@ class _ConversationRecord {
     required this.updatedAt,
   });
   String title;
-  final CoachLanguage? preferredLanguage;
-  final CoachLanguage? targetLanguage;
+  CoachLanguage? preferredLanguage;
+  CoachLanguage? targetLanguage;
   final DateTime createdAt;
   DateTime updatedAt;
   final Map<String, ChatMessage> messages = <String, ChatMessage>{};

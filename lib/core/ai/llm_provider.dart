@@ -7,10 +7,17 @@ class CoachRequest {
     required this.text,
     required this.targetLanguage,
     required this.intent,
+    this.languageChangedDuringConversation = false,
   });
   final String text;
   final CoachLanguage targetLanguage;
   final CoachIntent intent;
+
+  /// True when the conversation history was produced in a different language
+  /// than this turn's target. Providers turn this into an explicit
+  /// "from this turn on, answer in X" instruction — a mixed-language
+  /// transcript otherwise pulls the model back to the old language.
+  final bool languageChangedDuringConversation;
 }
 
 /// Provider contract used by [ConversationEngine]. The current interface is

@@ -210,7 +210,11 @@ class LocalQwenProvider implements LlmProvider {
   String _composePrompt(CoachRequest request, List<ChatMessage> context) {
     final sys = StringBuffer()
       ..writeln('You are a friendly language tutor.')
-      ..writeln('Target language: ${request.targetLanguage.code}')
+      ..writeln('Target language: ${request.targetLanguage.code}'
+          ' (${request.targetLanguage.label})')
+      ..writeln('Always answer in the target language above. Earlier'
+          ' conversation turns may use another language; they never override'
+          ' the target language for this turn.')
       ..writeln(
           'Always teach the user, even when their input is only one word, name, or place.')
       ..writeln('Return exactly two sections in this format:')
@@ -276,6 +280,11 @@ class LocalQwenProvider implements LlmProvider {
         createdAt: DateTime.now(),
         response: response,
         model: id,
+        status: ChatMessageStatus.completed,
+        languageMismatch: looksLikeLanguageMismatch(
+          answer,
+          request.targetLanguage.code,
+        ),
       ),
     );
   }

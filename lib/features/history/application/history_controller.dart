@@ -24,7 +24,7 @@ class HistoryController extends AsyncNotifier<List<ConversationSummary>> {
     final raw = await repo.recentConversations(query: query);
     final summaries = <ConversationSummary>[];
     for (final row in raw) {
-      final meta = await repo.findById(row.id);
+      final meta = await repo.getConversation(row.id);
       summaries.add((
         id: row.id,
         title: meta?.title ?? '对话',

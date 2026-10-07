@@ -5,6 +5,7 @@ import '../chat/chat_page.dart';
 import '../history/history_page.dart';
 import '../practice/practice_page.dart';
 import '../settings/settings_page.dart';
+import 'application/home_navigation.dart';
 
 class HomePage extends ConsumerStatefulWidget {
   const HomePage({super.key});
@@ -14,18 +15,18 @@ class HomePage extends ConsumerStatefulWidget {
 }
 
 class _HomePageState extends ConsumerState<HomePage> {
-  int index = 0;
   String? _practicePrompt;
 
   void _startPractice(String prompt) {
     setState(() {
       _practicePrompt = prompt;
-      index = 0;
     });
+    ref.read(homeTabProvider.notifier).state = HomeTab.chat;
   }
 
   @override
   Widget build(BuildContext context) {
+    final index = homeTabIndex(ref.watch(homeTabProvider));
     final pages = [
       ChatPage(initialPrompt: _practicePrompt),
       PracticePage(onStart: _startPractice),
@@ -38,7 +39,10 @@ class _HomePageState extends ConsumerState<HomePage> {
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: index,
-        onDestinationSelected: (value) => setState(() => index = value),
+        onDestinationSelected: (value) {
+          ref.read(homeTabProvider.notifier).state = HomeTab.values[value];
+          setState(() {});
+        },
         destinations: const [
           NavigationDestination(
             icon: Icon(Icons.chat_bubble_outline),

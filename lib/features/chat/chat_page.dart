@@ -3,28 +3,29 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:uuid/uuid.dart';
 
-import '../../core/ai/llm_event.dart';
-import '../../core/ai/structured_response_parser.dart';
 import '../../core/audio/asr_engine.dart';
-import '../../core/database/app_database_provider.dart';
 import '../../core/models/app_settings.dart';
 import '../../core/models/chat_models.dart';
-import '../../core/network/api_client.dart';
-import '../../core/repositories/sqlite_conversation_repository.dart';
 import '../../core/ui/app_toast.dart';
 import '../history/application/history_controller.dart';
 import '../settings/application/settings_controller.dart';
+import 'application/chat_controller.dart';
 import 'application/chat_session_state.dart';
-import 'application/conversation_providers.dart';
+import 'application/chat_state.dart';
 import 'application/speech_session_controller.dart';
+import 'application/tts_controller.dart';
 import 'application/waveform_controller.dart';
 import 'widgets/message_bubble.dart';
 import 'widgets/session_character.dart';
 import 'widgets/session_error_card.dart';
 import 'widgets/waveform_view.dart';
 
+/// Renders the transcript for whatever conversation [chatControllerProvider]
+/// currently owns. This widget deliberately holds no conversation id, no
+/// message list and no stream subscription — everything it shows is read from
+/// the controller, and every mutation is a command on it. The only state kept
+/// here is genuinely view-local (text + scroll controllers).
 class ChatPage extends ConsumerStatefulWidget {
   const ChatPage({super.key, this.initialPrompt});
 
@@ -37,23 +38,15 @@ class ChatPage extends ConsumerStatefulWidget {
 class _ChatPageState extends ConsumerState<ChatPage> {
   final controller = TextEditingController();
   final scrollController = ScrollController();
-  final messages = <ChatMessage>[];
-  final _uuid = const Uuid();
-  StreamSubscription<LlmEvent>? replySubscription;
-  bool isStreaming = false;
-  /// Id of the assistant bubble currently streaming. A cancelled turn never
-  /// receives `LlmEventComplete`, so we need it to settle the bubble.
-  String? _streamingMessageId;
   bool _atBottom = true;
-  String _currentConversationId = '';
-  String _lastUserInput = '';
-  bool _hydrated = false;
 
   @override
   void initState() {
     super.initState();
     scrollController.addListener(_onScroll);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _hydrate());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(chatControllerProvider.notifier).initialize();
+    });
     _applyInitialPrompt(widget.initialPrompt);
   }
 
@@ -63,6 +56,14 @@ class _ChatPageState extends ConsumerState<ChatPage> {
     if (oldWidget.initialPrompt != widget.initialPrompt) {
       _applyInitialPrompt(widget.initialPrompt);
     }
+  }
+
+  @override
+  void dispose() {
+    scrollController.removeListener(_onScroll);
+    controller.dispose();
+    scrollController.dispose();
+    super.dispose();
   }
 
   void _applyInitialPrompt(String? prompt) {
@@ -82,53 +83,22 @@ class _ChatPageState extends ConsumerState<ChatPage> {
     }
   }
 
-  Future<void> _hydrate() async {
-    if (_hydrated) return;
-    _hydrated = true;
-    final repo = ref.read(conversationRepositoryProvider);
-    final settings = ref.read(settingsControllerProvider);
-    if (settings.saveHistory &&
-        settings.lastConversationId != null &&
-        settings.lastConversationId!.isNotEmpty) {
-      final id = settings.lastConversationId!;
-      final msgs = await repo.messagesFor(id);
-      if (!mounted) return;
-      setState(() {
-        _currentConversationId = id;
-        messages
-          ..clear()
-          ..addAll(msgs);
-      });
-    } else {
-      _currentConversationId = _uuid.v4();
-    }
-  }
-
-  @override
-  void dispose() {
-    replySubscription?.cancel();
-    scrollController.removeListener(_onScroll);
-    controller.dispose();
-    scrollController.dispose();
-    super.dispose();
-  }
-
   Future<void> toggleListening() async {
-    final controller = ref.read(speechSessionControllerProvider.notifier);
+    final speech = ref.read(speechSessionControllerProvider.notifier);
     final state = ref.read(speechSessionControllerProvider);
     if (state.listening) {
-      await controller.stop();
+      await speech.stop();
       return;
     }
     // Surface a friendly error if the runtime hasn't loaded a profile yet
     // — the controller would also fail, but with a less actionable message.
-    final ready = await controller.ensureEngineReady();
+    final ready = await speech.ensureEngineReady();
     if (!ready) {
       _showVoiceError('当前设备没有可用的语音识别服务');
       return;
     }
     try {
-      await controller.start();
+      await speech.start();
     } on PlatformException catch (error) {
       _showVoiceError(error.message ?? '无法启动语音识别');
     }
@@ -162,263 +132,38 @@ class _ChatPageState extends ConsumerState<ChatPage> {
     AppToast.error(context, message);
   }
 
-  Future<void> send() async {
-    if (isStreaming) return;
+  void _send() {
     final text = controller.text.trim();
     if (text.isEmpty) return;
+    if (text.characters.length > kMaxUserMessageLength) return;
     controller.clear();
-    _lastUserInput = text;
-
-    if (_currentConversationId.isEmpty) {
-      _currentConversationId = _uuid.v4();
-    }
-
-    final settings = ref.read(settingsControllerProvider);
-    final userMsg = ChatMessage(
-      id: 'u_${_uuid.v4()}',
-      role: MessageRole.user,
-      sourceText: text,
-      createdAt: DateTime.now(),
-    );
-    final placeholder = ChatMessage(
-      id: 'a_${_uuid.v4()}',
-      role: MessageRole.assistant,
-      createdAt: DateTime.now(),
-    );
-    setState(() {
-      messages
-        ..add(userMsg)
-        ..add(placeholder);
-      isStreaming = true;
-    });
     _scrollDown();
+    unawaited(ref.read(chatControllerProvider.notifier).send(text));
+  }
 
-    if (settings.saveHistory) {
-      await _saveSettingsAndMessages(userMsg);
+  void _useSuggestion(String text) {
+    controller.text = text;
+    controller.selection =
+        TextSelection.collapsed(offset: controller.text.length);
+    _send();
+  }
+
+  /// Stop playback and dictation when the conversation underneath them
+  /// changes. Errors are swallowed on purpose: a missing audio backend must
+  /// not block the conversation switch the user actually asked for.
+  Future<void> _stopSessionAudio() async {
+    try {
+      await ref.read(ttsControllerProvider.notifier).stop();
+    } catch (_) {
+      // No audio backend available in this environment.
     }
-    _beginReply(text, placeholder.id);
-  }
-
-  Future<void> _saveSettingsAndMessages(ChatMessage userMsg) async {
-    final repo = ref.read(conversationRepositoryProvider);
-    final settings = ref.read(settingsControllerProvider);
-    await repo.ensureConversation(
-      _currentConversationId,
-      preferredLanguage: settings.preferredLanguage,
-      targetLanguage: settings.preferredLanguage,
-    );
-    await repo.appendMessage(
-      conversationId: _currentConversationId,
-      message: userMsg,
-    );
-    if (settings.lastConversationId != _currentConversationId) {
-      ref
-          .read(settingsControllerProvider.notifier)
-          .setLastConversationId(_currentConversationId);
-    }
-  }
-
-  void _beginReply(String text, String placeholderId) {
-    replySubscription?.cancel();
-    _streamingMessageId = placeholderId;
-    final engine = ref.read(conversationEngineProvider);
-    final settings = ref.read(settingsControllerProvider);
-    final historyContext =
-        settings.saveHistory ? _recentContext() : const <ChatMessage>[];
-    replySubscription =
-        engine.replyStream(text, context: historyContext).listen(
-      (event) {
-        if (!mounted) return;
-        switch (event) {
-          case LlmEventDelta(:final text):
-            _appendDelta(placeholderId, text);
-          case LlmEventThinking(:final text):
-            _appendThinking(placeholderId, text);
-          case LlmEventComplete(:final response, :final assistantMessage):
-            _finalizeMessage(placeholderId, assistantMessage);
-            _persistAssistant(assistantMessage.copyWith(response: response));
-          case LlmEventError(:final error):
-            _renderError(placeholderId, error);
-        }
-        if (event is LlmEventComplete || event is LlmEventError) {
-          _streamingMessageId = null;
-        }
-      },
-      onError: (Object e) {
-        if (!mounted) return;
-        _renderError(
-            placeholderId, LlmError(LlmErrorKind.unknown, e.toString()));
-      },
-      onDone: () {
-        if (!mounted) return;
-        setState(() => isStreaming = false);
-        _scrollDown();
-      },
-    );
-  }
-
-  List<ChatMessage> _recentContext({int max = 20}) {
-    if (messages.length <= max) return List.unmodifiable(messages);
-    return List.unmodifiable(messages.sublist(messages.length - max));
-  }
-
-  Future<void> _persistAssistant(ChatMessage assistant) async {
-    final settings = ref.read(settingsControllerProvider);
-    if (!settings.saveHistory) return;
-    final repo = ref.read(conversationRepositoryProvider);
-    final id = _currentConversationId;
-    if (id.isEmpty) return;
-    await repo.ensureConversation(id);
-    await repo.appendMessage(conversationId: id, message: assistant);
-
-    // Auto-title from the first user input — cheap local heuristic.
-    final repo0 = repo;
-    if (repo0 is SqliteConversationRepository) {
-      final meta = await repo0.findById(id);
-      if (meta != null &&
-          meta.title.startsWith('对话 ') &&
-          _lastUserInput.isNotEmpty) {
-        await repo0.updateTitle(id, _shortTitle(_lastUserInput));
+    try {
+      if (ref.read(speechSessionControllerProvider).listening) {
+        await ref.read(speechSessionControllerProvider.notifier).stop();
       }
+    } catch (_) {
+      // Speech backend unavailable; nothing to stop.
     }
-  }
-
-  void _appendDelta(String id, String delta) {
-    final idx = messages.indexWhere((m) => m.id == id);
-    if (idx < 0) return;
-    final current = messages[idx];
-    final response = current.response ??
-        CoachResponse(
-          intent: CoachIntent.conversation,
-          sourceLanguage: 'auto',
-          targetLanguage: '',
-          primary: '',
-          explanation: '',
-          sentences: const <CoachSentence>[],
-        );
-    final next = response.copyWith(primary: response.primary + delta);
-    setState(() {
-      messages[idx] = current.copyWith(response: next);
-    });
-  }
-
-  void _appendThinking(String id, String delta) {
-    final idx = messages.indexWhere((m) => m.id == id);
-    if (idx < 0) return;
-    final current = messages[idx];
-    final response = current.response ??
-        CoachResponse(
-          intent: CoachIntent.conversation,
-          sourceLanguage: 'auto',
-          targetLanguage: '',
-          primary: '',
-          explanation: '',
-          sentences: const <CoachSentence>[],
-        );
-    final next = response.copyWith(thinking: response.thinking + delta);
-    setState(() {
-      messages[idx] = current.copyWith(response: next);
-    });
-  }
-
-  void _finalizeMessage(String id, ChatMessage finalized) {
-    final idx = messages.indexWhere((m) => m.id == id);
-    if (idx < 0) return;
-    setState(() {
-      messages[idx] = finalized.copyWith(id: id);
-    });
-  }
-
-  void _renderError(String id, LlmError error) {
-    final idx = messages.indexWhere((m) => m.id == id);
-    if (idx < 0) return;
-    setState(() {
-      messages[idx] = ChatMessage(
-        id: id,
-        role: MessageRole.error,
-        createdAt: DateTime.now(),
-        sourceText: _describe(error),
-      );
-    });
-  }
-
-  void stopReply() {
-    final cancelledId = _streamingMessageId;
-    replySubscription?.cancel();
-    replySubscription = null;
-    _streamingMessageId = null;
-    if (!mounted) return;
-    setState(() => isStreaming = false);
-    if (cancelledId != null) _settleCancelledReply(cancelledId);
-    _scrollDown();
-  }
-
-  /// A cancelled turn never receives `LlmEventComplete`, so the bubble still
-  /// holds whatever raw tokens arrived. For the OpenAI-compatible providers
-  /// those tokens are the raw JSON scaffold (`{"intent":…,"primary":"It is`),
-  /// which would otherwise become — and stay as — the final answer.
-  ///
-  /// Parse what we have: if it decodes, keep the readable part; if it is
-  /// mid-scaffold JSON there is nothing to show, so we say so explicitly
-  /// instead of leaving a brace in the transcript.
-  void _settleCancelledReply(String id) {
-    final idx = messages.indexWhere((m) => m.id == id);
-    if (idx < 0) return;
-    final current = messages[idx];
-    final raw = (current.response?.primary ?? '').trim();
-    if (raw.isEmpty) return;
-
-    final settings = ref.read(settingsControllerProvider);
-    final parsed = const StructuredResponseParser().parse(
-      raw,
-      intent: CoachIntent.conversation,
-      targetLanguage: settings.preferredLanguage,
-    );
-    // A partial JSON object decoded to itself, so the fallback text is still
-    // the scaffold — that is not something to persist or display as an answer.
-    final isTruncatedJson = parsed.primary.trim() == raw &&
-        (raw.startsWith('{') || raw.contains('"primary"'));
-    final kept = isTruncatedJson ? '' : parsed.primary.trim();
-
-    final response = (current.response ?? parsed).copyWith(
-      primary: kept.isEmpty ? '已停止生成，没有收到完整回复。' : kept,
-      // A half-streamed reply has no trustworthy sentence boundaries.
-      sentences: const <CoachSentence>[],
-      explanation: isTruncatedJson
-          ? '本次生成被手动停止，回复内容不完整。'
-          : parsed.explanation,
-    );
-    setState(() {
-      messages[idx] = current.copyWith(response: response);
-    });
-    if (!isTruncatedJson && kept.isNotEmpty) {
-      _persistAssistant(messages[idx]);
-    }
-  }
-
-  void retryLast() {
-    if (_lastUserInput.isEmpty || isStreaming) return;
-    controller.text = _lastUserInput;
-    send();
-  }
-
-  String _describe(LlmError error) {
-    return switch (error.kind) {
-      LlmErrorKind.unauthorized => '未授权：请检查 API Key',
-      LlmErrorKind.rateLimited => '请求过于频繁，请稍后再试',
-      LlmErrorKind.timeout => '请求超时，请检查网络',
-      LlmErrorKind.network => '网络不可用',
-      LlmErrorKind.format => '模型返回格式异常',
-      LlmErrorKind.server => '上游服务异常',
-      LlmErrorKind.cancelled => '已取消',
-      LlmErrorKind.unknown => '未知错误',
-    };
-  }
-
-  String _shortTitle(String sourceText) {
-    final trimmed = sourceText.trim();
-    if (trimmed.length <= 18) return trimmed;
-    return '${trimmed.substring(0, 18)}…';
   }
 
   void _scrollDown() {
@@ -433,18 +178,12 @@ class _ChatPageState extends ConsumerState<ChatPage> {
     });
   }
 
-  void _useSuggestion(String text) {
-    controller.text = text;
-    controller.selection =
-        TextSelection.collapsed(offset: controller.text.length);
-    send();
-  }
-
   @override
   Widget build(BuildContext context) {
-    final phase = ref.watch(chatSessionPhaseProvider);
-    final error = ref.watch(chatSessionErrorProvider);
+    final chat = ref.watch(chatControllerProvider);
+    final chatController = ref.read(chatControllerProvider.notifier);
     final speechState = ref.watch(speechSessionControllerProvider);
+
     // Mirror partial transcripts into the composer + surface engine errors
     // as toasts. Runs in build() so the listener stays attached for the
     // whole widget lifetime, not just on hot reloads of the listener.
@@ -465,15 +204,40 @@ class _ChatPageState extends ConsumerState<ChatPage> {
         );
       }
     });
+
+    // A conversation switch (new / open / deleted) means the transcript the
+    // user was reading is gone. The draft input travels with the
+    // conversation, and audio / dictation belong to the session that just
+    // ended — leaving either running would talk over a conversation the user
+    // is no longer looking at.
+    ref.listen<ChatState>(chatControllerProvider, (prev, next) {
+      if (prev == null || prev.epoch == next.epoch) return;
+      if (controller.text.trim().isNotEmpty) controller.clear();
+      setState(() => _atBottom = true);
+      _scrollDown();
+      unawaited(_stopSessionAudio());
+    });
+
+    final messages = chat.messages;
+    final turnLanguageLabel = chat.lastTurnLanguage?.label;
+
     return Scaffold(
       drawer: const _ChatDrawer(),
-      onDrawerChanged: (opened) {
-        if (!opened) setState(() {});
-      },
       appBar: const _ChatAppBar(),
       body: SafeArea(
         child: Column(
           children: [
+            if (turnLanguageLabel != null &&
+                chat.lastTurnLanguage != null &&
+                chat.lastTurnLanguage != chat.conversationLanguage)
+              _ExplicitLanguageNotice(language: chat.lastTurnLanguage!),
+            if (chat.loadStatus == ChatLoadStatus.loading)
+              const LinearProgressIndicator(minHeight: 2),
+            if (chat.error != null)
+              _ChatLoadErrorBanner(
+                message: chat.error!,
+                onRetry: chatController.initialize,
+              ),
             Expanded(
               child: messages.isEmpty
                   ? _EmptyState(
@@ -487,23 +251,26 @@ class _ChatPageState extends ConsumerState<ChatPage> {
                           itemCount: messages.length,
                           itemBuilder: (context, index) {
                             final message = messages[index];
+                            final isStreamingBubble = chat.isStreaming &&
+                                index == messages.length - 1;
                             if (message.role == MessageRole.error) {
                               return _ErrorBubble(
                                 text: message.sourceText ?? '',
-                                onRetry:
-                                    _lastUserInput.isEmpty ? null : retryLast,
+                                onRetry: chat.isStreaming
+                                    ? null
+                                    : chatController.regenerateLast,
                               );
                             }
                             final isLast = index == messages.length - 1;
                             return MessageBubble(
                               message: message,
-                              conversationId: _currentConversationId,
+                              conversationId: chat.conversationId,
                               isLast: isLast,
-                              isStreaming: isStreaming,
-                              onRegenerate: (!isStreaming &&
-                                      _lastUserInput.isNotEmpty &&
+                              isStreaming: isStreamingBubble,
+                              onRegenerate: (!chat.isStreaming &&
+                                      chat.lastUserMessageId != null &&
                                       message.role == MessageRole.assistant)
-                                  ? retryLast
+                                  ? chatController.regenerateLast
                                   : null,
                             );
                           },
@@ -513,24 +280,23 @@ class _ChatPageState extends ConsumerState<ChatPage> {
                             right: 16,
                             bottom: 12,
                             child: _ScrollToBottomButton(
-                              hasNew: isStreaming,
+                              hasNew: chat.isStreaming,
                               onTap: _scrollDown,
                             ),
                           ),
                       ],
                     ),
             ),
-            _SessionStatusStrip(
-              phase: phase,
-              error: error,
-            ),
-            if (isStreaming) _StopGenerationBar(onStop: stopReply),
+            const _SessionStatusStripHost(),
+            if (chat.isStreaming)
+              _StopGenerationBar(onStop: chatController.stopGeneration),
             _Composer(
               controller: controller,
-              onSend: send,
+              onSend: _send,
               onToggleListening: toggleListening,
-              onStop: isStreaming ? stopReply : null,
+              onStop: chat.isStreaming ? chatController.stopGeneration : null,
               isListening: speechState.listening,
+              maxLength: kMaxUserMessageLength,
             ),
           ],
         ),
@@ -558,6 +324,8 @@ class _ChatAppBar extends ConsumerWidget implements PreferredSizeWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final settings = ref.watch(settingsControllerProvider);
+    final conversationLanguage =
+        ref.watch(chatControllerProvider.select((s) => s.conversationLanguage));
     return AppBar(
       elevation: 0,
       scrolledUnderElevation: 0.5,
@@ -580,11 +348,14 @@ class _ChatAppBar extends ConsumerWidget implements PreferredSizeWidget {
       centerTitle: false,
       titleSpacing: 0,
       actions: [
+        // The in-chat selector is the *conversation* target, not the global
+        // default. Changing it here used to silently rewrite the user's
+        // app-wide default and confuse every other conversation.
         _LanguageSelector(
-          current: settings.preferredLanguage,
+          current: conversationLanguage,
           onPick: (lang) => ref
-              .read(settingsControllerProvider.notifier)
-              .setPreferredLanguage(lang),
+              .read(chatControllerProvider.notifier)
+              .setConversationLanguage(lang),
         ),
         const SizedBox(width: 4),
       ],
@@ -669,7 +440,7 @@ class _LanguageSelector extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return PopupMenuButton<CoachLanguage>(
-      tooltip: '切换目标语言',
+      tooltip: '切换本轮目标语言',
       position: PopupMenuPosition.under,
       itemBuilder: (ctx) => CoachLanguage.values
           .map(
@@ -700,6 +471,65 @@ class _LanguageSelector extends StatelessWidget {
             fontSize: 13,
             fontWeight: FontWeight.w600,
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Shown when the learner's own words named a language that differs from the
+/// conversation selector, so an explicit "用英语怎么说" doesn't look like the
+/// selector was ignored by mistake.
+class _ExplicitLanguageNotice extends StatelessWidget {
+  const _ExplicitLanguageNotice({required this.language});
+
+  final CoachLanguage language;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      color: scheme.secondaryContainer,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+      child: Text(
+        '本轮已按你的要求使用 ${language.flag} ${language.label} 回答',
+        style: TextStyle(
+          fontSize: 12,
+          color: scheme.onSecondaryContainer,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+}
+
+class _ChatLoadErrorBanner extends StatelessWidget {
+  const _ChatLoadErrorBanner({required this.message, required this.onRetry});
+
+  final String message;
+  final Future<void> Function() onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: scheme.errorContainer,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 8, 8, 8),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                message,
+                style: TextStyle(color: scheme.onErrorContainer, fontSize: 13),
+              ),
+            ),
+            TextButton(
+              onPressed: () => onRetry(),
+              child: const Text('重试'),
+            ),
+          ],
         ),
       ),
     );
@@ -842,12 +672,14 @@ class _Composer extends StatefulWidget {
     required this.onToggleListening,
     required this.onStop,
     required this.isListening,
+    required this.maxLength,
   });
   final TextEditingController controller;
   final VoidCallback onSend;
   final VoidCallback onToggleListening;
   final VoidCallback? onStop;
   final bool isListening;
+  final int maxLength;
 
   @override
   State<_Composer> createState() => _ComposerState();
@@ -866,6 +698,15 @@ class _ComposerState extends State<_Composer> {
   }
 
   @override
+  void didUpdateWidget(covariant _Composer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller.removeListener(_onChanged);
+      widget.controller.addListener(_onChanged);
+    }
+  }
+
+  @override
   void dispose() {
     widget.controller.removeListener(_onChanged);
     super.dispose();
@@ -880,8 +721,9 @@ class _ComposerState extends State<_Composer> {
     final controller = widget.controller;
     final scheme = Theme.of(context).colorScheme;
     final text = controller.text;
-    final showCounter = text.characters.length >= _counterThreshold;
-    final overLimit = text.characters.length > 500;
+    final length = text.characters.length;
+    final showCounter = length >= _counterThreshold;
+    final overLimit = length > widget.maxLength;
 
     return Material(
       color: scheme.surface,
@@ -919,9 +761,13 @@ class _ComposerState extends State<_Composer> {
                         maxLines: 6,
                         textInputAction: TextInputAction.send,
                         keyboardType: TextInputType.multiline,
-                        onSubmitted: (_) => widget.onSend(),
-                        decoration: const InputDecoration(
-                          hintText: '输入你想学习的表达…',
+                        onSubmitted: overLimit ? null : (_) => widget.onSend(),
+                        decoration: InputDecoration(
+                          hintText: overLimit
+                              ? '内容超出 ${widget.maxLength} 字上限，请精简后再发送'
+                              : '输入你想学习的表达…',
+                          hintStyle:
+                              overLimit ? TextStyle(color: scheme.error) : null,
                           border: InputBorder.none,
                         ),
                       ),
@@ -935,9 +781,11 @@ class _ComposerState extends State<_Composer> {
                     )
                   else
                     IconButton.filled(
-                      onPressed: widget.onSend,
+                      // Hard block instead of a red counter: a message the
+                      // server will reject should never leave the device.
+                      onPressed: overLimit ? null : widget.onSend,
                       icon: const Icon(Icons.arrow_upward_rounded),
-                      tooltip: '发送',
+                      tooltip: overLimit ? '超出字数上限' : '发送',
                     ),
                 ],
               ),
@@ -946,7 +794,7 @@ class _ComposerState extends State<_Composer> {
               Padding(
                 padding: const EdgeInsets.only(top: 2, right: 4),
                 child: Text(
-                  '${text.characters.length} / 500',
+                  '$length / ${widget.maxLength}',
                   style: TextStyle(
                     fontSize: 10,
                     color: overLimit ? scheme.error : Colors.black45,
@@ -996,6 +844,18 @@ class _ErrorBubble extends StatelessWidget {
 /// during the recording/processing/playing phases, the live waveform
 /// while ASR is producing samples, and a retry card when the session
 /// has surfaced an error. Idle = nothing.
+class _SessionStatusStripHost extends ConsumerWidget {
+  const _SessionStatusStripHost();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return _SessionStatusStrip(
+      phase: ref.watch(chatSessionPhaseProvider),
+      error: ref.watch(chatSessionErrorProvider),
+    );
+  }
+}
+
 class _SessionStatusStrip extends ConsumerWidget {
   const _SessionStatusStrip({
     required this.phase,
@@ -1065,17 +925,17 @@ class _SessionStatusStrip extends ConsumerWidget {
   }
 }
 
-/// Slide-out conversation history. Reuses [historyControllerProvider] so the
-/// drawer and the History tab see the exact same data — switching to an old
-/// conversation just rewires `lastConversationId` and the chat page reloads.
+/// Slide-out conversation history. Shares [historyControllerProvider] with the
+/// History tab, and delegates selection to the same
+/// `ChatController.openConversation` — the drawer used to only rewrite
+/// `lastConversationId`, so tapping a conversation appeared to do nothing.
 class _ChatDrawer extends ConsumerWidget {
   const _ChatDrawer();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final conversations = ref.watch(historyControllerProvider);
-    final settings = ref.read(settingsControllerProvider);
-    final currentId = settings.lastConversationId;
+    final currentId = ref.watch(chatControllerProvider).conversationId;
     final scheme = Theme.of(context).colorScheme;
 
     return Drawer(
@@ -1099,11 +959,12 @@ class _ChatDrawer extends ConsumerWidget {
                   IconButton(
                     tooltip: '新建对话',
                     icon: const Icon(Icons.edit_outlined),
-                    onPressed: () {
-                      ref
-                          .read(settingsControllerProvider.notifier)
-                          .setLastConversationId(null);
+                    onPressed: () async {
                       Navigator.of(context).pop();
+                      await ref
+                          .read(chatControllerProvider.notifier)
+                          .newConversation();
+                      if (!context.mounted) return;
                       AppToast.success(context, '已开始新对话');
                     },
                   ),
@@ -1146,11 +1007,11 @@ class _ChatDrawer extends ConsumerWidget {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
-                        onTap: () {
-                          ref
-                              .read(settingsControllerProvider.notifier)
-                              .setLastConversationId(item.id);
+                        onTap: () async {
                           Navigator.of(context).pop();
+                          await ref
+                              .read(chatControllerProvider.notifier)
+                              .openConversation(item.id);
                         },
                         onLongPress: () =>
                             _confirmDelete(context, ref, item.id),
@@ -1190,9 +1051,7 @@ class _ChatDrawer extends ConsumerWidget {
       ),
     );
     if (ok != true) return;
-    await ref
-        .read(historyControllerProvider.notifier)
-        .deleteConversation(conversationId);
+    await deleteConversationAndSync(ref, conversationId);
   }
 }
 

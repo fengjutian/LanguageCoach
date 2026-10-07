@@ -31,6 +31,11 @@ dependencies:
   # Stable message identifiers
   uuid: ^4.5.1
 
+  # Grapheme-cluster length for the 500-character message cap. The chat
+  # controller imports it directly (Flutter only re-exports it to widgets),
+  # so it has to be a declared dependency rather than transitive.
+  characters: ^1.4.0
+
   # Audio playback (P1-1 wiring — Android ExoPlayer-backed)
   just_audio: ^0.9.42
 

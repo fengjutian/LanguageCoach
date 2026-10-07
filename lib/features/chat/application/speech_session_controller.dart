@@ -5,7 +5,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/audio/asr_engine.dart';
 import '../../../core/audio/asr_model_profile.dart';
 import '../../../core/native/native_ai_bridge.dart';
-import '../../settings/application/settings_controller.dart';
 import 'conversation_providers.dart';
 
 /// Stream the ASR engine is listening on. Backed by the Kotlin side
@@ -16,7 +15,9 @@ import 'conversation_providers.dart';
 /// events (`ASR_START` etc.) are handled inside
 /// [SpeechSessionController] so they don't surface as fake failures.
 final asrResultStreamProvider = StreamProvider<AsrResult>((ref) {
-  return ref.watch(nativeAiBridgeProvider).eventStream
+  return ref
+      .watch(nativeAiBridgeProvider)
+      .eventStream
       .map((event) => event?.toAsrResult())
       .where((result) => result != null)
       .cast<AsrResult>();
@@ -24,8 +25,8 @@ final asrResultStreamProvider = StreamProvider<AsrResult>((ref) {
 
 /// Settings-side knob: which ASR input language to use. Distinct from
 /// the coach target language — a user learning English might prefer to
-/// dictate in Mandarin. Falls back to the coach target language when the
-/// user hasn't picked one yet.
+/// dictate in Mandarin. `null` means "no explicit choice"; see
+/// [resolvedAsrLanguageProvider] for what that resolves to.
 class AsrInputLanguageController extends Notifier<String?> {
   @override
   String? build() => null;
@@ -40,13 +41,20 @@ final asrInputLanguageProvider =
   AsrInputLanguageController.new,
 );
 
+/// Sentinel meaning "let the engine auto-detect the spoken language".
+const String kAsrLanguageAuto = 'auto';
+
 /// Computed language the runtime should actually pass to the ASR engine.
-/// Prefers the explicit ASR input choice, then falls back to the coach
-/// target language.
+///
+/// The default is `auto`, *not* the coach target language. A learner who
+/// switched the target to Japanese and then dictates a Chinese question was
+/// previously transcribed with a Japanese model, which mangled the input.
+/// Dictation is what the user says; the target language is what we answer in
+/// — those are independent choices.
 final resolvedAsrLanguageProvider = Provider<String>((ref) {
-  final fallback = ref.watch(settingsControllerProvider).preferredLanguage.code;
   final explicit = ref.watch(asrInputLanguageProvider);
-  return (explicit == null || explicit.isEmpty) ? fallback : explicit;
+  if (explicit != null && explicit.isNotEmpty) return explicit;
+  return kAsrLanguageAuto;
 });
 
 /// ASR engine selection. P1-4 only knows `auto` (system SpeechRecognizer)
@@ -255,6 +263,16 @@ class SpeechSessionController extends Notifier<SpeechSessionState> {
       state = state.copyWith(engineReady: ok);
       return ok;
     }
+    if (language == kAsrLanguageAuto) {
+      // Auto-detection is a system-recognizer capability. The bundled
+      // sherpa-onnx profiles are single-language, so handing them `auto`
+      // made `bestFit` return null and dictation silently failed for every
+      // user who had not picked an explicit input language. Route `auto` to
+      // the system engine, which is the one that can actually decide.
+      final ok = await bridge.isSpeechRecognitionAvailable();
+      state = state.copyWith(engineReady: ok, clearActiveProfile: true);
+      return ok;
+    }
     if (_readEngine() == AsrEngineChoice.sherpaOnnx) {
       try {
         final raw = await bridge.listAsrProfiles();
@@ -284,7 +302,9 @@ class SpeechSessionController extends Notifier<SpeechSessionState> {
     // indicator) reflect what actually got selected.
     final sherpa = await _trySherpa(language, bridge);
     if (sherpa.ok) {
-      ref.read(asrEngineChoiceProvider.notifier).set(AsrEngineChoice.sherpaOnnx);
+      ref
+          .read(asrEngineChoiceProvider.notifier)
+          .set(AsrEngineChoice.sherpaOnnx);
       // Without this the engine reported itself ready while `engineReady`
       // stayed false, so the readiness indicator never lit up.
       state = state.copyWith(
