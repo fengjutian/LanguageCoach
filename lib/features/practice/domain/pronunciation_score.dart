@@ -31,6 +31,21 @@ abstract interface class PronunciationScorer {
 class TranscriptPronunciationScorer implements PronunciationScorer {
   const TranscriptPronunciationScorer();
 
+  /// `_tokens` yields one token per *character* for CJK but one per *word*
+  /// for space-delimited scripts, so CJK needs its own pace window.
+  /// Conversational Mandarin/Japanese sits around 4-6 chars/s, i.e.
+  /// 240-360 chars/min — well outside the 70-190 wpm used for latin, which
+  /// previously punished every CJK read and told the user to slow down when
+  /// they were already too fast.
+  static const double _cjkSlowCharsPerMinute = 180;
+  static const double _cjkFastCharsPerMinute = 420;
+  static const double _slowWordsPerMinute = 70;
+  static const double _fastWordsPerMinute = 190;
+
+  static final RegExp _cjk = RegExp(r'[\u3400-\u9fff\u3040-\u30ff\uac00-\ud7af]');
+
+  static bool _isCjk(String value) => _cjk.hasMatch(value);
+
   @override
   Future<PronunciationScore> score({
     required String reference,
@@ -58,11 +73,19 @@ class TranscriptPronunciationScorer implements PronunciationScorer {
 
     var fluency = _clamp((100 - (lengthRatio - 1).abs() * 45).round());
     if (duration != null && duration.inMilliseconds > 0) {
-      final wordsPerMinute = actual.length * 60000 / duration.inMilliseconds;
-      final pacePenalty = wordsPerMinute < 70
-          ? (70 - wordsPerMinute) * .5
-          : wordsPerMinute > 190
-              ? (wordsPerMinute - 190) * .35
+      // `_tokens` yields one token per *character* for CJK but one per *word*
+      // for space-delimited scripts, so a single "words per minute" window
+      // silently punished every Chinese/Japanese read (normal delivery is
+      // 4-6 chars/s = 240-360 "wpm") and told the user to slow down when
+      // they were already too fast. Normalise per script instead.
+      final isCjk = _isCjk(reference);
+      final rate = actual.length * 60000 / duration.inMilliseconds;
+      final slow = isCjk ? _cjkSlowCharsPerMinute : _slowWordsPerMinute;
+      final fast = isCjk ? _cjkFastCharsPerMinute : _fastWordsPerMinute;
+      final pacePenalty = rate < slow
+          ? (slow - rate) * .5
+          : rate > fast
+              ? (rate - fast) * .35
               : 0;
       fluency = _clamp(fluency - pacePenalty.round());
     }

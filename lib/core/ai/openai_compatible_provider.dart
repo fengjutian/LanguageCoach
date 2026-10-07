@@ -178,6 +178,12 @@ JSON object (no prose, no markdown fences) matching this schema:
     };
   }
 
+  // Frame boundaries: the SSE spec terminates a frame with a blank line.
+  // A "bare `\n` separated frames" workaround was tried and reverted — a
+  // frame whose payload spans several `data:` lines and two frames joined by
+  // a single `\n` are byte-for-byte identical, so no heuristic can tell them
+  // apart and guessing would break the (spec-conforming, and actually
+  // emitted by MiniMax / DeepSeek) multi-line case.
   Stream<_SseEvent> _decodeSse(Stream<List<int>> bytes) async* {
     final data = <String>[];
     int? status;

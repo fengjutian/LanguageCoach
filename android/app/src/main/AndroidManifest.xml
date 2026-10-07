@@ -1,5 +1,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+    <!-- Required in every build variant: Flutter's template only declares
+         INTERNET in the debug/profile manifests, so a release APK would ship
+         without it and every cloud LLM call + model download would fail. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
 
     <queries>
         <intent>

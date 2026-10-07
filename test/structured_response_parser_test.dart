@@ -123,4 +123,33 @@ some trailing explanation
     expect(r.thinking, 'just thinking');
     expect(r.primary, 'hello world');
   });
+
+  test('strips a fence preceded by prose on the same line', () {
+    // The old guard required `startsWith('```')` or `contains('\n```')`, so
+    // a single-line "Sure: ```json {...}```" was returned unchanged, the
+    // decode failed, and the backticks ended up inside `primary`.
+    const raw = 'Sure! ```json {"primary":"hello"}```';
+    final r = parse(raw);
+    expect(r.primary, 'hello');
+  });
+
+  test('strips an upper-case JSON fence annotation', () {
+    // `startsWith('json')` is case-sensitive, so ```JSON glued "JSON" onto
+    // the payload and the decode failed.
+    const raw = '```JSON\n{"primary":"hello"}\n```';
+    final r = parse(raw);
+    expect(r.primary, 'hello');
+  });
+
+  test('strips a fence with no language annotation', () {
+    const raw = '```\n{"primary":"hello"}\n```';
+    final r = parse(raw);
+    expect(r.primary, 'hello');
+  });
+
+  test('strips a fence with an unusual language annotation', () {
+    const raw = '```javascript\n{"primary":"hello"}\n```';
+    final r = parse(raw);
+    expect(r.primary, 'hello');
+  });
 }

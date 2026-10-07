@@ -1,5 +1,7 @@
 import 'package:language_coach/core/audio/asr_engine.dart';
 import 'package:language_coach/core/audio/asr_model_profile.dart';
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 
 /// Stable Flutter boundary for the Kotlin Native AI Core.
@@ -113,6 +115,32 @@ class DefaultBridge implements NativeAiBridge {
       MethodChannel('language_coach/ai_commands');
   static const EventChannel _events = EventChannel('language_coach/ai_events');
 
+  /// Every native call goes through here. The Kotlin handlers for
+  /// `loadModel` / `warmupModel` / `synthesize` run synchronously on the
+  /// platform thread, so a wedged native runtime (or a result that is simply
+  /// never delivered) used to leave the Dart future pending forever — the UI
+  /// stayed `busy` with every button disabled and no way out.
+  static const Duration _callTimeout = Duration(seconds: 60);
+
+  Future<T?> _invoke<T>(
+    String method, [
+    Map<String, Object?>? arguments,
+    Duration? timeout,
+  ]) async {
+    try {
+      return await _commands
+          .invokeMethod<T>(method, arguments)
+          .timeout(timeout ?? _callTimeout);
+    } on MissingPluginException catch (e) {
+      throw StateError('原生模块不可用（$method）：${e.message ?? e}');
+    } on TimeoutException {
+      throw TimeoutException(
+        '原生调用 $method 超时（${(timeout ?? _callTimeout).inSeconds} 秒）',
+        (timeout ?? _callTimeout),
+      );
+    }
+  }
+
   // `_events.receiveBroadcastStream()` returns a fresh broadcast stream on
   // every call AND triggers Kotlin `onListen`. Without this cache the
   // Flutter side stacks up redundant subscriptions, the Kotlin side
@@ -129,7 +157,7 @@ class DefaultBridge implements NativeAiBridge {
     String? manifestJson,
     String? localDirectory,
   }) =>
-      _commands.invokeMethod<String>('loadLlmModel', {
+      _invoke<String>('loadLlmModel', {
         'modelId': modelId,
         'manifestJson': manifestJson,
         'localDirectory': localDirectory,
@@ -143,7 +171,7 @@ class DefaultBridge implements NativeAiBridge {
     int? maxTokens,
     double? temperature,
   }) =>
-      _commands.invokeMethod<String>('startLlmGeneration', {
+      _invoke<String>('startLlmGeneration', {
         'sessionId': sessionId,
         'prompt': prompt,
         'modelId': modelId,
@@ -153,18 +181,18 @@ class DefaultBridge implements NativeAiBridge {
 
   @override
   Future<void> cancelLlmGeneration({required String sessionId}) =>
-      _commands.invokeMethod<void>('cancelLlmGeneration', {
+      _invoke<void>('cancelLlmGeneration', {
         'sessionId': sessionId,
       });
 
   @override
   Future<void> unloadLlmModel({required String modelId}) =>
-      _commands.invokeMethod<void>('unloadLlmModel', {'modelId': modelId});
+      _invoke<void>('unloadLlmModel', {'modelId': modelId});
 
   @override
   Future<List<Map<Object?, Object?>>> listLlmModels() async {
     final raw =
-        await _commands.invokeMethod<List<Object?>>('listLlmModels');
+        await _invoke<List<Object?>>('listLlmModels');
     return raw?.cast<Map<Object?, Object?>>() ?? const [];
   }
 
@@ -176,7 +204,7 @@ class DefaultBridge implements NativeAiBridge {
     double? speed = 1,
     String? model,
   }) =>
-      _commands.invokeMethod<String>('synthesize', {
+      _invoke<String>('synthesize', {
         'text': text,
         'language': language,
         'voice': voice,
@@ -190,7 +218,7 @@ class DefaultBridge implements NativeAiBridge {
     required String manifestJson,
     String? localDirectory,
   }) =>
-      _commands.invokeMethod<String>('loadModel', {
+      _invoke<String>('loadModel', {
         'modelId': modelId,
         'manifestJson': manifestJson,
         'localDirectory': localDirectory,
@@ -198,17 +226,17 @@ class DefaultBridge implements NativeAiBridge {
 
   @override
   Future<int> warmupModel({required String modelId}) =>
-      _commands.invokeMethod<int>('warmupModel', {'modelId': modelId}).then(
+      _invoke<int>('warmupModel', {'modelId': modelId}).then(
         (v) => v ?? 0,
       );
 
   @override
   Future<void> unloadModel({required String modelId}) =>
-      _commands.invokeMethod<void>('unloadModel', {'modelId': modelId});
+      _invoke<void>('unloadModel', {'modelId': modelId});
 
   @override
   Future<bool> cancelSynthesis() =>
-      _commands.invokeMethod<bool>('cancelSynthesis').then((v) => v ?? false);
+      _invoke<bool>('cancelSynthesis').then((v) => v ?? false);
 
   @override
   Future<Map<Object?, Object?>?> benchmarkSnapshot() =>
@@ -216,7 +244,7 @@ class DefaultBridge implements NativeAiBridge {
 
   @override
   Future<List<Map<Object?, Object?>>> listAsrProfiles() async {
-    final raw = await _commands.invokeMethod<List<Object?>>('listAsrProfiles');
+    final raw = await _invoke<List<Object?>>('listAsrProfiles');
     return raw?.cast<Map<Object?, Object?>>() ?? const [];
   }
 
@@ -225,7 +253,7 @@ class DefaultBridge implements NativeAiBridge {
     required String profileId,
     required String languageCode,
   }) =>
-      _commands.invokeMethod<bool>('loadAsrProfile', {
+      _invoke<bool>('loadAsrProfile', {
         'profileId': profileId,
         'languageCode': languageCode,
       }).then((v) => v ?? false);
@@ -236,7 +264,7 @@ class DefaultBridge implements NativeAiBridge {
     String? profileId,
     int? silenceTimeoutMs,
   }) =>
-      _commands.invokeMethod<void>('startAsrCapture', {
+      _invoke<void>('startAsrCapture', {
         'preferredAsrLanguage': preferredAsrLanguage,
         'profileId': profileId,
         'silenceTimeoutMs': silenceTimeoutMs,
@@ -244,27 +272,27 @@ class DefaultBridge implements NativeAiBridge {
 
   @override
   Future<void> stopAsrCapture() =>
-      _commands.invokeMethod<void>('stopAsrCapture');
+      _invoke<void>('stopAsrCapture');
 
   @override
   Future<void> cancelAsrCapture() =>
-      _commands.invokeMethod<void>('cancelAsrCapture');
+      _invoke<void>('cancelAsrCapture');
 
   @override
   Future<bool> isSpeechRecognitionAvailable() async =>
-      await _commands.invokeMethod<bool>('isSpeechRecognitionAvailable') ??
+      await _invoke<bool>('isSpeechRecognitionAvailable') ??
       false;
 
   @override
   Future<void> startListening({required String language}) =>
-      _commands.invokeMethod<void>('startListening', {'language': language});
+      _invoke<void>('startListening', {'language': language});
 
   @override
-  Future<void> stopListening() => _commands.invokeMethod<void>('stopListening');
+  Future<void> stopListening() => _invoke<void>('stopListening');
 
   @override
   Future<void> cancelListening() =>
-      _commands.invokeMethod<void>('cancelListening');
+      _invoke<void>('cancelListening');
 }
 
 /// Helper to bridge the Kotlin event payloads into typed Dart objects.

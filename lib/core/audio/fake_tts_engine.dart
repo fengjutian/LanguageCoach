@@ -22,7 +22,7 @@ class FakeTtsEngine implements TtsEngine {
     if (!outputDirectory.existsSync()) {
       outputDirectory.createSync(recursive: true);
     }
-    final filename = '${request.cacheKey().hashCode}.wav';
+    final filename = '${request.cacheFileBaseName()}.wav';
     final path = '${outputDirectory.path}/$filename';
     final file = File(path);
     if (!file.existsSync()) {
@@ -30,11 +30,13 @@ class FakeTtsEngine implements TtsEngine {
       // for [AudioPlayerService.load] to succeed without choking.
       file.writeAsBytesSync(_emptyWavHeader);
     }
-    _controller.add(TtsSynthesisComplete(TtsResult(
-      audioPath: path,
-      bytes: _emptyWavHeader.length,
-      format: 'wav',
-    )));
+    if (!_controller.isClosed) {
+      _controller.add(TtsSynthesisComplete(TtsResult(
+        audioPath: path,
+        bytes: _emptyWavHeader.length,
+        format: 'wav',
+      )));
+    }
     return TtsResult(
       audioPath: path,
       bytes: _emptyWavHeader.length,

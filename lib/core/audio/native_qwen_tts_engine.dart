@@ -29,6 +29,16 @@ class NativeQwenTtsEngine implements TtsEngine {
 
   final _controller = StreamController<TtsSynthesisEvent>.broadcast();
 
+  /// `_controller.add` on a closed controller throws `Bad state`, and the
+  /// catch-all below used to turn that into `TtsError(unknown, 'Bad state:
+  /// …')` — so a WAV that had been written successfully was reported to the
+  /// user as a synthesis failure whenever the engine was disposed (engine
+  /// switch, API-key change) while a synthesis was still in flight.
+  void _emit(TtsSynthesisEvent event) {
+    if (_controller.isClosed) return;
+    _controller.add(event);
+  }
+
   @override
   Future<TtsResult> synthesize(TtsRequest request) async {
     try {
@@ -42,17 +52,17 @@ class NativeQwenTtsEngine implements TtsEngine {
       if (path == null || path.isEmpty) {
         final err = TtsError(TtsErrorKind.engineUnavailable,
             'native runtime returned no audio path');
-        _controller.add(TtsSynthesisFailed(err));
+        _emit(TtsSynthesisFailed(err));
         throw err;
       }
       final file = File(path);
       if (!file.existsSync()) {
         final err = TtsError(TtsErrorKind.format,
             'native runtime wrote to a missing file: $path');
-        _controller.add(TtsSynthesisFailed(err));
+        _emit(TtsSynthesisFailed(err));
         throw err;
       }
-      _controller.add(TtsSynthesisComplete(TtsResult(
+      _emit(TtsSynthesisComplete(TtsResult(
         audioPath: path,
         format: 'wav',
         bytes: file.lengthSync(),

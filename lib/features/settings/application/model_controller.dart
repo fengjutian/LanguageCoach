@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/audio/model_download_service.dart';
@@ -229,15 +230,50 @@ class ModelController extends Notifier<ModelListState> {
     if (manifest == null) return false;
     final installPath =
         '${service.rootDirectory.path}/models/${manifest.id}/${manifest.version}';
-    final f = File(installPath);
-    if (f.existsSync()) return manifest.sha256 == 'PLACEHOLDER_SHA256';
 
-    final directory = Directory(installPath);
-    if (!directory.existsSync() || manifest.artifacts.isEmpty) return false;
-    return manifest.artifacts.every((artifact) {
-      final artifactFile = File('$installPath/${artifact.relativePath}');
-      return artifactFile.existsSync() &&
-          artifactFile.lengthSync() == artifact.sizeBytes;
-    });
+    // Repository layout — every artifact is checked against its own digest.
+    if (manifest.artifacts.isNotEmpty) {
+      final directory = Directory(installPath);
+      if (!directory.existsSync()) return false;
+      for (final artifact in manifest.artifacts) {
+        final artifactFile = File('$installPath/${artifact.relativePath}');
+        if (!artifactFile.existsSync()) return false;
+        if (artifact.sizeBytes > 0 &&
+            artifactFile.lengthSync() != artifact.sizeBytes) {
+          return false;
+        }
+        // This used to compare file length only, so an artifact that was
+        // truncated to the right length or bit-flipped still reported as
+        // 已校验通过 and `ModelDownloadStatus.corrupted` was unreachable —
+        // the corruption then surfaced as an opaque native load failure.
+        if (_isRealDigest(artifact.sha256) &&
+            await _sha256OfFile(artifactFile.path) != artifact.sha256) {
+          return false;
+        }
+      }
+      return true;
+    }
+
+    // Single-file layout.
+    final file = File(installPath);
+    if (!file.existsSync()) return false;
+    if (manifest.sizeBytes > 0 && file.lengthSync() != manifest.sizeBytes) {
+      return false;
+    }
+    if (_isRealDigest(manifest.sha256)) {
+      return await _sha256OfFile(file.path) == manifest.sha256;
+    }
+    // Placeholder digest: there is nothing to compare against, so accept the
+    // size check rather than reporting a verification that never happened.
+    return true;
+  }
+
+  static bool _isRealDigest(String value) =>
+      value.isNotEmpty && value != 'PLACEHOLDER_SHA256';
+
+  Future<String> _sha256OfFile(String path) async {
+    final digest =
+        await sha256.bind(File(path).openRead().cast<List<int>>()).first;
+    return digest.toString();
   }
 }

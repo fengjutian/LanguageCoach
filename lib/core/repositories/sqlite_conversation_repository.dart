@@ -42,9 +42,20 @@ class SqliteConversationRepository implements ConversationRepository {
         'created_at': (createdAt ?? DateTime.now()).millisecondsSinceEpoch,
         'updated_at': now,
       });
-    } else if (title != null && existing.first['title'] == _defaultTitle()) {
+    } else if (title != null && _isAutoTitle(existing.first['title'] as String?)) {
+      // `_defaultTitle()` re-derives the timestamp at call time, so the old
+      // `== _defaultTitle()` guard could only match within the same minute
+      // of creation — the branch was effectively dead. Match the shape
+      // instead, and only replace it if it really is an auto title.
       await updateTitle(id, title);
     }
+  }
+
+  /// True when [title] is one of the placeholder titles this repository
+  /// generates, i.e. it has not been named by the user or by the chat page.
+  static bool _isAutoTitle(String? title) {
+    if (title == null) return false;
+    return RegExp(r'^对话 \d{2}-\d{2} \d{2}:\d{2}$').hasMatch(title);
   }
 
   @override
@@ -202,7 +213,7 @@ class SqliteConversationRepository implements ConversationRepository {
     final trimmedQuery = query?.trim();
     final where = trimmedQuery == null || trimmedQuery.isEmpty
         ? null
-        : '(title LIKE ? OR EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = conversations.id AND m.source_text LIKE ?))';
+        : "(title LIKE ? ESCAPE '\\' OR EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = conversations.id AND m.source_text LIKE ? ESCAPE '\\'))";
     // Escape SQL LIKE wildcards so user input doesn't get interpreted as
     // a pattern: `%` (any), `_` (single char), and `\` (escape itself).
     final escaped = _escapeLike(trimmedQuery ?? '');
@@ -221,11 +232,20 @@ class SqliteConversationRepository implements ConversationRepository {
     final ids = rows.map((r) => r['id'] as String).toList();
     if (ids.isNotEmpty) {
       final placeholder = List.filled(ids.length, '?').join(',');
+      // The LIMIT here is a *global* cap on the result set, so binding
+      // `ids.length` returned at most N rows across all conversations
+      // instead of N per conversation: any conversation whose latest user
+      // message ranked below the cut got no row at all and rendered with a
+      // blank preview. Take the newest message per conversation instead.
       final msgRows = await _db.rawQuery(
-        'SELECT conversation_id, source_text FROM messages '
-        'WHERE conversation_id IN ($placeholder) '
-        'AND role = ? ORDER BY created_at DESC LIMIT ?',
-        [...ids, MessageRole.user.name, ids.length],
+        'SELECT m.conversation_id, m.source_text FROM messages m '
+        'JOIN (SELECT conversation_id, MAX(created_at) AS latest '
+        '      FROM messages WHERE role = ? AND conversation_id IN '
+        '($placeholder) GROUP BY conversation_id) newest '
+        '  ON m.conversation_id = newest.conversation_id '
+        ' AND m.created_at = newest.latest '
+        'WHERE m.role = ?',
+        [MessageRole.user.name, ...ids, MessageRole.user.name],
       );
       for (final row in msgRows) {
         final id = row['conversation_id'] as String;
@@ -260,6 +280,10 @@ class SqliteConversationRepository implements ConversationRepository {
 
   /// Escape SQL LIKE wildcards so user-typed search terms don't get
   /// interpreted as patterns. The default escape character is `\`.
+  ///
+  /// The escaping is only effective because the queries carry an explicit
+  /// `ESCAPE '\'` clause — SQLite's LIKE has *no* default escape character,
+  /// so without it `\%` was a literal backslash followed by a live wildcard.
   static String _escapeLike(String input) {
     return input
         .replaceAll('\\', '\\\\')

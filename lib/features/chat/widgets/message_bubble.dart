@@ -298,6 +298,13 @@ class MessageBubble extends ConsumerWidget {
                   conversationId: conversationId,
                   messageId: message.id,
                   text: response.primary,
+                  // Play back exactly the sentences the tiles render, so
+                  // the controller's `s_<id>_<index>` keys line up with the
+                  // tile ids. Re-splitting `primary` here could yield a
+                  // different count and silently mis-key every tile.
+                  sentences: response.sentences
+                      .map((sentence) => sentence.text)
+                      .toList(growable: false),
                   languageCode: response.targetLanguage,
                 ),
                 onPrev: tts.previous,

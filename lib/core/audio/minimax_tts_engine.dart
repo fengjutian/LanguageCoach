@@ -122,7 +122,7 @@ class MinimaxTtsEngine implements TtsEngine {
       if (!outputDirectory.existsSync()) {
         outputDirectory.createSync(recursive: true);
       }
-      final fileName = '${request.cacheKey().hashCode}.$audioFormat';
+      final fileName = '${request.cacheFileBaseName()}.$audioFormat';
       final outPath = '${outputDirectory.path}/$fileName';
       await File(outPath).writeAsBytes(bytes, flush: true);
       final result = TtsResult(

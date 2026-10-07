@@ -78,7 +78,12 @@ class JustAudioPlayer implements AudioPlayerService {
         next.processingState == ProcessingState.loading) {
       _emit(AudioPlaybackState.loading);
     } else {
-      _emit(AudioPlaybackState.paused);
+      // `ProcessingState.idle` after an explicit stop means "stopped", not
+      // "paused" — mapping it to paused broke resume and the play/stop
+      // affordance in the chat bubble.
+      _emit(next.processingState == ProcessingState.idle
+          ? AudioPlaybackState.idle
+          : AudioPlaybackState.paused);
     }
   }
 

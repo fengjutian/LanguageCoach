@@ -1,3 +1,7 @@
+import 'dart:convert';
+
+import 'package:crypto/crypto.dart';
+
 /// Inputs to the text-to-speech pipeline. Stable identifier fields so the
 /// audio cache can key on (text, language, voice, speed, model) without
 /// re-synthesising identical requests.
@@ -21,9 +25,19 @@ class TtsRequest {
   /// Stable cache key. Same request -> same digest, regardless of object
   /// identity. SHA-1 is fine here — collisions would merely trigger a cache
   /// miss, not data corruption.
+  ///
+  /// The text is hashed with SHA-1 rather than `String.hashCode`: Dart's
+  /// `hashCode` is randomised per process, so every app launch derived a
+  /// *different* key for the same request, the on-disk cache could never hit
+  /// and each launch wrote a fresh copy of every synthesized file.
   String cacheKey() {
-    return '$language|$voiceId|$speed|$emotion|$modelVersion|${text.hashCode}';
+    return sha1.convert(utf8.encode(
+      '$language|$voiceId|$speed|$emotion|$modelVersion|$text',
+    )).toString();
   }
+
+  /// Filesystem-safe, process-stable base name for this request's audio.
+  String cacheFileBaseName() => cacheKey();
 
   TtsRequest copyWith({
     String? text,

@@ -113,14 +113,16 @@ class StructuredResponseParser {
   /// Falls through unchanged if no fence is present.
   String _stripFence(String input) {
     const fenceStart = '```';
-    if (!input.startsWith(fenceStart) && !input.contains('\n```')) {
-      return input;
-    }
-    var cursor = input.indexOf(fenceStart);
+    final cursor = input.indexOf(fenceStart);
+    if (cursor < 0) return input;
     var stripped = input.substring(cursor + fenceStart.length);
-    // Optional `json` annotation right after the fence.
-    if (stripped.startsWith('json')) {
-      stripped = stripped.substring(4);
+    // Optional language annotation right after the fence. Models write
+    // `json`, `JSON` and `Json` interchangeably, and a case-sensitive
+    // `startsWith('json')` glued `JSON` onto the payload so the decode failed
+    // and the backticks ended up inside `primary`.
+    final annotation = RegExp(r'^[A-Za-z0-9_+-]+').firstMatch(stripped);
+    if (annotation != null) {
+      stripped = stripped.substring(annotation.end);
     }
     stripped = stripped.trimLeft();
     final endIndex = stripped.lastIndexOf('```');

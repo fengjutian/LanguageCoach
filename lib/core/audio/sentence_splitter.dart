@@ -56,6 +56,10 @@ class SentenceSplitter {
     for (var i = 0; i < input.length; i++) {
       final ch = input[i];
       buffer.write(ch);
+      // A `.` between digits is a decimal point, not a terminator: without
+      // this "Pi is 3.14." split into "Pi is 3." + "14." and each fragment
+      // became its own TTS request. Same for the ellipsis run "...".
+      if (_isGluedPeriod(input, i)) continue;
       final isBoundary = _isHardBoundary(ch);
       if (isBoundary && buffer.isNotEmpty) {
         out.add(buffer.toString());
@@ -64,6 +68,26 @@ class SentenceSplitter {
     }
     if (buffer.isNotEmpty) out.add(buffer.toString());
     return out;
+  }
+
+  /// True when the `.` at [index] sits between two digits, or is part of an
+  /// ellipsis run, or directly follows a single-letter initial ("A.").
+  bool _isGluedPeriod(String input, int index) {
+    if (input[index] != '.') return false;
+    final next = index + 1 < input.length ? input[index + 1] : '';
+    if (index > 0 && next.isNotEmpty && _isDigit(input[index - 1]) && _isDigit(next)) {
+      return true;
+    }
+    if (index + 1 < input.length && input[index + 1] == '.') return true;
+    if (index > 0 && _isLetter(input[index - 1]) && next.isEmpty) return true;
+    return false;
+  }
+
+  bool _isDigit(String ch) => ch.codeUnitAt(0) ^ 0x30 <= 9;
+
+  bool _isLetter(String ch) {
+    final code = ch.codeUnitAt(0);
+    return (code ^ 0x41 <= 25) || (code ^ 0x61 <= 25);
   }
 
   bool _isHardBoundary(String ch) {

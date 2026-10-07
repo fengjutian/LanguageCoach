@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/audio/practice_recorder.dart';
 import '../../core/audio/tts_models.dart';
 import '../../core/models/app_settings.dart';
+import '../chat/application/speech_session_controller.dart';
 import '../chat/application/tts_controller.dart';
 import '../settings/application/settings_controller.dart';
 
@@ -85,22 +86,45 @@ class _ShadowingPageState extends ConsumerState<ShadowingPage> {
   bool _recording = false;
   bool _loading = false;
   String? _recordingPath;
+  /// Bumped on every play/stop so an older playback loop retires itself.
+  int _playGeneration = 0;
+  /// Re-entrancy guard for the mic button: `_recording` is only set *after*
+  /// `await recorder.start()`, so a double tap used to call `start()` twice
+  /// and leave the native recorder holding the mic while the UI believed
+  /// recording had stopped.
+  bool _recordingBusy = false;
 
   List<String> _sentences(CoachLanguage language) =>
       _scripts[language] ?? _scripts[CoachLanguage.english]!;
 
   @override
   void dispose() {
+    _playGeneration++;
     if (_recording) {
       unawaited(ref.read(practiceRecorderProvider).cancel());
     }
+    // Leaving mid-recording used to leave native capture running: the chat
+    // page owns the ASR session, the provider is non-autoDispose, and its
+    // onDispose only detaches the event stream — nothing called `stop()`.
+    // `ref` is unusable during finalization, so the notifier is captured in
+    // `build` instead.
+    if (_wasListening) {
+      unawaited(_speech?.stop());
+    }
     super.dispose();
   }
+
+  /// Captured while the page is still alive — see [dispose].
+  SpeechSessionController? _speech;
+  bool _wasListening = false;
 
   @override
   Widget build(BuildContext context) {
     final language = ref.watch(settingsControllerProvider).preferredLanguage;
     final sentences = _sentences(language);
+    final speech = ref.watch(speechSessionControllerProvider);
+    _speech = ref.read(speechSessionControllerProvider.notifier);
+    _wasListening = speech.listening;
     return Scaffold(
       appBar: AppBar(title: const Text('影子训练')),
       body: Column(
@@ -229,6 +253,12 @@ class _ShadowingPageState extends ConsumerState<ShadowingPage> {
     final language = ref.read(settingsControllerProvider).preferredLanguage;
     final sentences = _sentences(language);
     var index = fromIndex ?? _activeIndex;
+    // A second `_play` (tapping a sentence while one is already running)
+    // used to start a *second* loop on the same shared player: `_playing`
+    // stayed true so the first loop never exited, both interleaved audio,
+    // and whichever finished first cleared the flags while the other was
+    // still playing. The token retires the older loop immediately.
+    final token = ++_playGeneration;
     setState(() {
       _playing = true;
       _loading = true;
@@ -236,7 +266,7 @@ class _ShadowingPageState extends ConsumerState<ShadowingPage> {
     final player = ref.read(audioPlayerServiceProvider);
     await player.setSpeed(_speed);
     try {
-      while (mounted && _playing) {
+      while (mounted && _playing && token == _playGeneration) {
         setState(() => _activeIndex = index);
         final result = await ref.read(ttsEngineProvider).synthesize(TtsRequest(
               text: sentences[index],
@@ -266,7 +296,8 @@ class _ShadowingPageState extends ConsumerState<ShadowingPage> {
         );
       }
     } finally {
-      if (mounted) {
+      // Only the loop that still owns the playback may reset the flags.
+      if (mounted && token == _playGeneration) {
         setState(() {
           _playing = false;
           _loading = false;
@@ -276,10 +307,14 @@ class _ShadowingPageState extends ConsumerState<ShadowingPage> {
   }
 
   Future<void> _stop() async {
-    setState(() {
-      _playing = false;
-      _loading = false;
-    });
+    // Retire the running loop so its `finally` becomes a no-op.
+    _playGeneration++;
+    if (mounted) {
+      setState(() {
+        _playing = false;
+        _loading = false;
+      });
+    }
     await ref.read(audioPlayerServiceProvider).stop();
   }
 
@@ -294,6 +329,8 @@ class _ShadowingPageState extends ConsumerState<ShadowingPage> {
   }
 
   Future<void> _toggleRecording() async {
+    if (_recordingBusy) return;
+    _recordingBusy = true;
     final recorder = ref.read(practiceRecorderProvider);
     try {
       if (_recording) {
@@ -316,6 +353,8 @@ class _ShadowingPageState extends ConsumerState<ShadowingPage> {
           SnackBar(content: Text('录音失败：$error')),
         );
       }
+    } finally {
+      _recordingBusy = false;
     }
   }
 

@@ -136,6 +136,10 @@ class TtsBenchmarkController extends Notifier<BenchmarkState> {
       stopwatch.stop();
       state = state.copyWith(
         busy: false,
+        // A failed load must not leave `loaded: true` behind: the status
+        // tile would keep reading "Loaded" and Warmup / Synthesize / Unload
+        // stayed enabled against a runtime that just refused the model.
+        loaded: false,
         records: [
           BenchmarkRecord(
             label: 'load ${manifest.id}',

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -48,10 +50,28 @@ class _RepeatPracticePageState extends ConsumerState<RepeatPracticePage> {
   }
 
   @override
+  void dispose() {
+    // Leaving this page mid-recording used to leave native capture running:
+    // the provider is non-autoDispose and no code path called `stop()`.
+    // `ref` cannot be read during widget-tree finalization (Flutter asserts
+    // it), so the notifier is captured ahead of time in [_speech].
+    if (_wasListening) {
+      unawaited(_speech?.stop());
+    }
+    super.dispose();
+  }
+
+  /// Captured while the page is still alive — see [dispose].
+  SpeechSessionController? _speech;
+  bool _wasListening = false;
+
+  @override
   Widget build(BuildContext context) {
     final settings = ref.watch(settingsControllerProvider);
     final speech = ref.watch(speechSessionControllerProvider);
     final sentence = _sentence(settings.preferredLanguage);
+    _speech = ref.read(speechSessionControllerProvider.notifier);
+    _wasListening = speech.listening;
 
     ref.listen(speechSessionControllerProvider, (previous, next) {
       if (_step == RepeatStep.recording &&

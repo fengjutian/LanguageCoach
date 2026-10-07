@@ -39,8 +39,18 @@ class WaveformController extends Notifier<WaveformState> {
   @override
   WaveformState build() {
     final bridge = ref.watch(nativeAiBridgeProvider);
+    // `build` re-runs whenever the watched bridge changes. Overwriting `_sub`
+    // without cancelling first leaked the previous listener (and `onDispose`
+    // only ever cancelled the newest one), so stale frames kept writing
+    // `state` on a stale notifier instance.
+    unawaited(_sub?.cancel());
     _sub = bridge.eventStream.listen(_onEvent);
-    ref.onDispose(() => _sub?.cancel());
+    ref.onDispose(() {
+      final sub = _sub;
+      _sub = null;
+      unawaited(sub?.cancel());
+    });
+    _levels.clear();
     return const WaveformState();
   }
 

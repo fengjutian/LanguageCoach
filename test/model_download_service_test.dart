@@ -371,5 +371,52 @@ void main() {
       expect(partial.readAsBytesSync(), originalBytes,
           reason: '416 body must not have overwritten the partial file');
     });
+
+    test('a partial already at full size is verified instead of re-requested',
+        () async {
+      // The permanent-failure case: a partial that reached the canonical
+      // artifact size can never be resumed, because `Range: bytes=<total>-`
+      // is unsatisfiable and the server always answers 416. Since the partial
+      // was (correctly) left on disk, every retry recomputed the same offset
+      // and failed again — the model could not be installed, and the UI only
+      // offers `cancel()` while a download is in flight.
+      final root = await Directory.systemTemp.createTemp('model_dl_complete');
+      addTearDown(() => root.delete(recursive: true));
+      final installPath = '${root.path}/models/qwen3-tts-0.6B/0.6.0';
+      Directory('${root.path}/models/qwen3-tts-0.6B')
+          .createSync(recursive: true);
+
+      final partial = File('$installPath.partial');
+      partial.writeAsBytesSync(_FakeAdapter._defaultBody);
+
+      final adapter = _FakeAdapter(mode: 'range_unsatisfiable');
+      final dio = Dio()..httpClientAdapter = adapter;
+      final service = ModelDownloadService(
+        dio: dio,
+        rootDirectory: root,
+        events: events,
+      );
+      final received = <ModelEvent>[];
+      final sub = events.stream.listen(received.add);
+      addTearDown(() => sub.cancel());
+      final manifest = ModelManifest(
+        id: 'qwen3-tts-0.6B',
+        type: 'tts',
+        version: '0.6.0',
+        sizeBytes: _FakeAdapter._defaultBody.length,
+        downloadUrl: 'https://example.invalid/qwen3-tts-0.6B.tar.gz',
+        sha256: 'PLACEHOLDER_SHA256',
+        artifacts: const <ModelArtifact>[],
+      );
+
+      final path = await service.download(manifest);
+      expect(path, installPath);
+      expect(File(installPath).existsSync(), isTrue);
+      // Broadcast delivery is async — flush before asserting on events.
+      await Future<void>.delayed(Duration.zero);
+      // No request at all — a Range request would only ever get a 416.
+      expect(adapter.lastRangeHeader, isNull);
+      expect(received.whereType<ModelInstalled>(), hasLength(1));
+    });
   });
 }

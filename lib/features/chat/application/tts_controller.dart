@@ -163,6 +163,18 @@ class TtsController extends Notifier<TtsPlaybackState> {
   StreamSubscription<AudioQueueEvent>? _sub;
   late final AudioQueue _queue;
 
+  /// Latched playback failure, see [_onQueueEvent].
+  String? _playbackFailure;
+
+  /// Guards against a double-tap on the play button starting two concurrent
+  /// synthesis fans. `AudioQueue.enqueue` awaits `_player.stop()` before
+  /// mutating state, so the two runs interleaved and could emit a stale
+  /// `AudioQueueItemStarted` for the wrong message.
+  String? _playingMessageId;
+
+  /// Upper bound for one synthesis round-trip.
+  static const Duration _synthesisTimeout = Duration(seconds: 45);
+
   @override
   TtsPlaybackState build() {
     _queue = ref.read(audioQueueProvider);
@@ -170,6 +182,7 @@ class TtsController extends Notifier<TtsPlaybackState> {
     // every rebuild stacks a new listener and every queue event fires
     // N times. Same fix as model_controller (commit 135a2dc).
     _sub?.cancel();
+    _playbackFailure = null;
     _sub = _queue.events.listen(_onQueueEvent);
     ref.onDispose(() => _sub?.cancel());
     return const TtsPlaybackState();
@@ -180,11 +193,25 @@ class TtsController extends Notifier<TtsPlaybackState> {
     required String messageId,
     required String text,
     String? languageCode,
+    /// The caller's own sentence enumeration. The UI renders
+    /// `response.sentences` and derives each tile's id from its index, so
+    /// re-splitting `text` here could produce a *different* number of
+    /// sentences than the tiles. The indexes then disagreed, states were
+    /// written under ids no tile renders, and a tile could resolve the audio
+    /// cache to another sentence's clip. When provided, this is the single
+    /// source of truth for both sides.
+    List<String>? sentences,
   }) async {
     if (text.trim().isEmpty) return;
+    // A new playback attempt clears the latched failure from the previous one.
+    _playbackFailure = null;
     final splitter = ref.read(sentenceSplitterProvider);
-    final sentences = splitter.split(text);
-    if (sentences.isEmpty) return;
+    final parts = (sentences != null && sentences.isNotEmpty)
+        ? sentences.where((s) => s.trim().isNotEmpty).toList(growable: false)
+        : splitter.split(text);
+    if (parts.isEmpty) return;
+    if (_playingMessageId == messageId) return;
+    _playingMessageId = messageId;
 
     // Mark every sentence as generating up-front so the UI shows the
     // spinner for the whole message, not a one-by-one reveal. Then fan
@@ -194,10 +221,10 @@ class TtsController extends Notifier<TtsPlaybackState> {
         Map<String, SentencePlaybackState>.from(state.sentenceStates);
     final ids = <String>[];
     final texts = <String>[];
-    for (var i = 0; i < sentences.length; i++) {
+    for (var i = 0; i < parts.length; i++) {
       final id = 's_${messageId}_$i';
       ids.add(id);
-      texts.add(sentences[i]);
+      texts.add(parts[i]);
       stateMap[id] = SentencePlaybackState.generating;
     }
     state = state.copyWith(sentenceStates: stateMap);
@@ -245,8 +272,12 @@ class TtsController extends Notifier<TtsPlaybackState> {
     state = clearError
         ? state.copyWith(sentenceStates: stateMap, clearLastError: true)
         : state.copyWith(sentenceStates: stateMap, lastError: lastError);
-    if (items.isEmpty) return;
+    if (items.isEmpty) {
+      _playingMessageId = null;
+      return;
+    }
     await _queue.enqueue(items);
+    _playingMessageId = null;
   }
 
   Future<void> playSingleSentence({
@@ -257,6 +288,7 @@ class TtsController extends Notifier<TtsPlaybackState> {
     String? languageCode,
   }) async {
     if (text.trim().isEmpty) return;
+    _playbackFailure = null;
     final stateMap =
         Map<String, SentencePlaybackState>.from(state.sentenceStates);
     stateMap[sentenceId] = SentencePlaybackState.generating;
@@ -370,7 +402,16 @@ class TtsController extends Notifier<TtsPlaybackState> {
     }
 
     try {
-      final result = await engine.synthesize(request);
+      // A wedged engine used to pin `chatSessionPhaseProvider` at
+      // `processing` forever: no timeout, no error, the bubble kept
+      // spinning and the stop button was the only escape.
+      final result = await engine.synthesize(request).timeout(
+            _synthesisTimeout,
+            onTimeout: () => throw TtsError(
+              TtsErrorKind.unknown,
+              '语音合成超时（${_synthesisTimeout.inSeconds} 秒）',
+            ),
+          );
       if (cache != null) {
         await cache.record(
           conversationId: conversationId,
@@ -436,34 +477,58 @@ class TtsController extends Notifier<TtsPlaybackState> {
         bytes[1] == 0x49 &&
         bytes[2] == 0x46 &&
         bytes[3] == 0x46;
-    final hasNoPcmData = bytes.sublist(40, 44).every((byte) => byte == 0);
+    final hasNoPcmData =
+        bytes.length >= 44 && bytes.sublist(40, 44).every((byte) => byte == 0);
     return !(isWav && hasNoPcmData);
   }
 
   Future<void> pause() => _queue.pause();
   Future<void> resume() => _queue.resume();
-  Future<void> stop() => _queue.stop();
+  Future<void> stop() async {
+    _playbackFailure = null;
+    if (state.playback == AudioPlaybackState.error) {
+      state = state.copyWith(playback: AudioPlaybackState.idle);
+    }
+    return _queue.stop();
+  }
   Future<void> next() => _queue.next();
   Future<void> previous() => _queue.previous();
 
   void _onQueueEvent(AudioQueueEvent event) {
     switch (event) {
       case AudioQueueStarted():
+        if (_playbackFailure != null) return;
         state = state.copyWith(playback: AudioPlaybackState.loading);
       case AudioQueueItemStarted(:final item):
+        if (_playbackFailure != null) return;
         state = state.copyWith(
           currentSentenceId: item.sentenceId,
           playback: AudioPlaybackState.playing,
         );
-      case AudioQueueItemFailed():
-        state = state.copyWith(playback: AudioPlaybackState.error);
+      case AudioQueueItemFailed(:final item, :final message):
+        // The queue keeps going by default (`stopOnError: false`) and emits
+        // ItemStarted/Stopped immediately after, which used to overwrite this
+        // error in the very same frame — so `chatSessionErrorProvider` never
+        // saw it and the retry card never appeared. Latch until the user
+        // starts a new playback.
+        _playbackFailure = message;
+        state = state.copyWith(
+          playback: AudioPlaybackState.error,
+          currentSentenceId: item.sentenceId,
+          sentenceStates: <String, SentencePlaybackState>{
+            ...state.sentenceStates,
+            item.sentenceId: SentencePlaybackState.failed,
+          },
+        );
       case AudioQueueFinished():
+        if (_playbackFailure != null) return;
         // Preserve per-sentence states (cached / ready / failed) so the
         // UI keeps showing what's already on disk and re-plays skip the
         // cold path. The previous `const TtsPlaybackState(...)` reset
         // wiped the whole state map, hiding the cache.
         state = state.copyWith(playback: AudioPlaybackState.completed);
       case AudioQueueStopped():
+        if (_playbackFailure != null) return;
         state = state.copyWith(playback: AudioPlaybackState.idle);
     }
   }

@@ -163,9 +163,14 @@ class SpeechSessionController extends Notifier<SpeechSessionState> {
         }
         return;
       case 'ASR_CANCELLED':
-        if (state.listening) {
-          state = state.copyWith(listening: false, partialText: '');
-        }
+        // The `listening` guard must only gate the flag. If an
+        // AsrFailure/AsrFinal already flipped it false, the stale partial
+        // was never cleared and the composer kept mirroring it — so a
+        // cancelled utterance could still be sent as a real message.
+        state = state.copyWith(
+          listening: false,
+          partialText: '',
+        );
         return;
     }
     final result = frame.toAsrResult();
@@ -200,6 +205,9 @@ class SpeechSessionController extends Notifier<SpeechSessionState> {
       state = state.copyWith(
         listening: false,
         lastError: AsrErrorKind.unknown,
+        // Never leave the *previous* failure's native detail paired with the
+        // new `unknown` kind — the UI renders kind + message together.
+        lastErrorMessage: '无法启动语音识别。',
       );
       rethrow;
     }
@@ -274,34 +282,59 @@ class SpeechSessionController extends Notifier<SpeechSessionState> {
     // auto: try sherpa first, then fall back to system. Persist the
     // resolution back into the provider so subsequent reads (and a UI
     // indicator) reflect what actually got selected.
-    final sherpaOk = await _trySherpa(language, bridge);
-    if (sherpaOk) {
+    final sherpa = await _trySherpa(language, bridge);
+    if (sherpa.ok) {
       ref.read(asrEngineChoiceProvider.notifier).set(AsrEngineChoice.sherpaOnnx);
+      // Without this the engine reported itself ready while `engineReady`
+      // stayed false, so the readiness indicator never lit up.
+      state = state.copyWith(
+        engineReady: true,
+        activeProfile: sherpa.profile,
+      );
       return true;
     }
     final systemOk = await bridge.isSpeechRecognitionAvailable();
     ref.read(asrEngineChoiceProvider.notifier).set(AsrEngineChoice.system);
-    state = state.copyWith(engineReady: systemOk);
+    state = state.copyWith(
+      engineReady: systemOk,
+      clearActiveProfile: true,
+    );
     return systemOk;
   }
 
-  Future<bool> _trySherpa(String language, NativeAiBridge bridge) async {
-    final raw = await bridge.listAsrProfiles();
-    final installed = decodeAsrProfiles(raw);
-    final profile = bestFit(language, installed);
-    if (profile == null) return false;
-    return bridge.loadAsrProfile(
-      profileId: profile.id,
-      languageCode: language,
-    );
+  /// Never throws: the bridge call can raise `PlatformException` when the
+  /// native side is missing or torn down, and an escaping error would kill
+  /// `ensureEngineReady`'s bool contract and skip the system fallback.
+  Future<_SherpaAttempt> _trySherpa(
+      String language, NativeAiBridge bridge) async {
+    try {
+      final raw = await bridge.listAsrProfiles();
+      final installed = decodeAsrProfiles(raw);
+      final profile = bestFit(language, installed);
+      if (profile == null) return const _SherpaAttempt(false, null);
+      final ok = await bridge.loadAsrProfile(
+        profileId: profile.id,
+        languageCode: language,
+      );
+      return _SherpaAttempt(ok, ok ? profile : null);
+    } catch (_) {
+      return const _SherpaAttempt(false, null);
+    }
   }
 
   void _onResult(AsrResult result) {
     switch (result) {
       case AsrPartial(:final text):
-        state = state.copyWith(partialText: text);
+        // Clear the previous error: `chatSessionPhaseProvider` checks
+        // `lastError` *before* `listening`, so a stale error kept the mic
+        // replaced by a retry card even while capture was working again.
+        state = state.copyWith(partialText: text, clearError: true);
       case AsrFinal(:final text):
-        state = state.copyWith(partialText: text, listening: false);
+        state = state.copyWith(
+          partialText: text,
+          listening: false,
+          clearError: true,
+        );
       case AsrFailure(:final kind, :final message):
         state = state.copyWith(
           listening: false,
@@ -310,4 +343,11 @@ class SpeechSessionController extends Notifier<SpeechSessionState> {
         );
     }
   }
+}
+
+/// Result of attempting to bring up the sherpa-onnx engine in `auto` mode.
+class _SherpaAttempt {
+  const _SherpaAttempt(this.ok, this.profile);
+  final bool ok;
+  final AsrModelProfile? profile;
 }

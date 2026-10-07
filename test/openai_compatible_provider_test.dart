@@ -107,6 +107,31 @@ void main() {
     expect(events.whereType<LlmEventComplete>(), hasLength(1));
   });
 
+  test('joins a multi-line data payload terminated by a blank line', () async {
+    // Guards the SSE framing: a frame whose payload spans several `data:`
+    // lines must stay joined with `\n`. A "treat every `data:` line as a new
+    // frame" workaround was tried and reverted — it is byte-for-byte
+    // indistinguishable from two frames joined by a bare `\n`, and it broke
+    // this spec-conforming case.
+    const payload = 'data: {"choices":[{"delta":\n'
+        'data: {"content":"{\\"primary\\":\\"ok\\"}"}}]}\n'
+        '\n'
+        'data: [DONE]\n\n';
+    final provider = _providerWithAdapter(_StreamingAdapter(payload));
+
+    final events = await provider.generateStream(
+      const CoachRequest(
+        text: 'hello',
+        intent: CoachIntent.conversation,
+        targetLanguage: CoachLanguage.english,
+      ),
+      const <ChatMessage>[],
+    ).toList();
+
+    expect(events.whereType<LlmEventError>(), isEmpty);
+    expect(events.whereType<LlmEventDelta>().single.text, '{"primary":"ok"}');
+  });
+
   test('sends Chinese input as UTF-8 JSON', () async {
     final adapter = _StreamingAdapter();
     final provider = _providerWithAdapter(adapter);

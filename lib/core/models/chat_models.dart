@@ -142,7 +142,10 @@ class CoachResponse {
       alternatives: _readStringList(raw['alternatives']),
       explanation: raw['explanation']?.toString() ?? '',
       sentences: List.unmodifiable(sentences),
-      keywords: _readStringList(raw['keywords']),
+      // The prompt documents `learning.keywords` as the canonical layout,
+      // but some models emit a flat `keywords` list instead. Read both and
+      // never silently drop the vocabulary.
+      keywords: _readKeywords(raw),
     );
   }
 
@@ -164,6 +167,17 @@ List<String> _readStringList(Object? raw) {
     return raw.whereType<String>().toList(growable: false);
   }
   return const <String>[];
+}
+
+/// Vocabulary can arrive either flat (`keywords`) or nested under the
+/// documented `learning` object. Merge both, flat first, de-duplicated.
+List<String> _readKeywords(Map<Object?, Object?> raw) {
+  final flat = _readStringList(raw['keywords']);
+  final learning = raw['learning'];
+  final nested = learning is Map ? _readStringList(learning['keywords']) : const <String>[];
+  if (flat.isEmpty) return nested;
+  if (nested.isEmpty) return flat;
+  return List<String>.unmodifiable(<String>{...flat, ...nested});
 }
 
 class ChatMessage {

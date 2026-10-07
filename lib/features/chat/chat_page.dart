@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../core/ai/llm_event.dart';
+import '../../core/ai/structured_response_parser.dart';
 import '../../core/audio/asr_engine.dart';
 import '../../core/database/app_database_provider.dart';
 import '../../core/models/app_settings.dart';
@@ -40,6 +41,9 @@ class _ChatPageState extends ConsumerState<ChatPage> {
   final _uuid = const Uuid();
   StreamSubscription<LlmEvent>? replySubscription;
   bool isStreaming = false;
+  /// Id of the assistant bubble currently streaming. A cancelled turn never
+  /// receives `LlmEventComplete`, so we need it to settle the bubble.
+  String? _streamingMessageId;
   bool _atBottom = true;
   String _currentConversationId = '';
   String _lastUserInput = '';
@@ -216,6 +220,7 @@ class _ChatPageState extends ConsumerState<ChatPage> {
 
   void _beginReply(String text, String placeholderId) {
     replySubscription?.cancel();
+    _streamingMessageId = placeholderId;
     final engine = ref.read(conversationEngineProvider);
     final settings = ref.read(settingsControllerProvider);
     final historyContext =
@@ -234,6 +239,9 @@ class _ChatPageState extends ConsumerState<ChatPage> {
             _persistAssistant(assistantMessage.copyWith(response: response));
           case LlmEventError(:final error):
             _renderError(placeholderId, error);
+        }
+        if (event is LlmEventComplete || event is LlmEventError) {
+          _streamingMessageId = null;
         }
       },
       onError: (Object e) {
@@ -335,11 +343,57 @@ class _ChatPageState extends ConsumerState<ChatPage> {
   }
 
   void stopReply() {
+    final cancelledId = _streamingMessageId;
     replySubscription?.cancel();
     replySubscription = null;
+    _streamingMessageId = null;
     if (!mounted) return;
     setState(() => isStreaming = false);
+    if (cancelledId != null) _settleCancelledReply(cancelledId);
     _scrollDown();
+  }
+
+  /// A cancelled turn never receives `LlmEventComplete`, so the bubble still
+  /// holds whatever raw tokens arrived. For the OpenAI-compatible providers
+  /// those tokens are the raw JSON scaffold (`{"intent":…,"primary":"It is`),
+  /// which would otherwise become — and stay as — the final answer.
+  ///
+  /// Parse what we have: if it decodes, keep the readable part; if it is
+  /// mid-scaffold JSON there is nothing to show, so we say so explicitly
+  /// instead of leaving a brace in the transcript.
+  void _settleCancelledReply(String id) {
+    final idx = messages.indexWhere((m) => m.id == id);
+    if (idx < 0) return;
+    final current = messages[idx];
+    final raw = (current.response?.primary ?? '').trim();
+    if (raw.isEmpty) return;
+
+    final settings = ref.read(settingsControllerProvider);
+    final parsed = const StructuredResponseParser().parse(
+      raw,
+      intent: CoachIntent.conversation,
+      targetLanguage: settings.preferredLanguage,
+    );
+    // A partial JSON object decoded to itself, so the fallback text is still
+    // the scaffold — that is not something to persist or display as an answer.
+    final isTruncatedJson = parsed.primary.trim() == raw &&
+        (raw.startsWith('{') || raw.contains('"primary"'));
+    final kept = isTruncatedJson ? '' : parsed.primary.trim();
+
+    final response = (current.response ?? parsed).copyWith(
+      primary: kept.isEmpty ? '已停止生成，没有收到完整回复。' : kept,
+      // A half-streamed reply has no trustworthy sentence boundaries.
+      sentences: const <CoachSentence>[],
+      explanation: isTruncatedJson
+          ? '本次生成被手动停止，回复内容不完整。'
+          : parsed.explanation,
+    );
+    setState(() {
+      messages[idx] = current.copyWith(response: response);
+    });
+    if (!isTruncatedJson && kept.isNotEmpty) {
+      _persistAssistant(messages[idx]);
+    }
   }
 
   void retryLast() {

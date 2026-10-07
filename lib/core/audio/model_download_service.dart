@@ -70,6 +70,33 @@ class ModelDownloadService {
     var downloaded = existing;
 
     try {
+      // A partial that already reached the canonical artifact size can never
+      // be resumed: `Range: bytes=<total>-` is unsatisfiable and the server
+      // answers 416, and because the partial was (correctly) left on disk
+      // every retry recomputed the same offset and failed again — the model
+      // was permanently un-installable with only `cancel()` (offered solely
+      // while downloading/paused) as an escape hatch. Verify the bytes we
+      // already have instead, with no network round-trip.
+      if (manifest.sizeBytes > 0 && existing >= manifest.sizeBytes) {
+        events.add(ModelVerifying(id));
+        final actual = await _sha256OfFile(tempPath);
+        if (manifest.sha256 != 'PLACEHOLDER_SHA256' &&
+            manifest.sha256 != actual) {
+          try {
+            File(tempPath).deleteSync();
+          } catch (_) {}
+          events.add(ModelErrored(
+            id,
+            ModelErrorKind.checksumMismatch,
+            'expected ${manifest.sha256}, got $actual',
+          ));
+          return null;
+        }
+        File(tempPath).renameSync(installPath);
+        events.add(ModelInstalled(id, installPath));
+        return installPath;
+      }
+
       final headers = <String, Object?>{
         if (existing > 0) 'Range': 'bytes=$existing-',
       };
@@ -219,6 +246,25 @@ class ModelDownloadService {
           continue;
         }
         var existing = partial.existsSync() ? partial.lengthSync() : 0;
+        // Same 416 trap as the single-file path: a partial that already
+        // reached the artifact size cannot be resumed. Drop it and restart
+        // this artifact so the model stays installable.
+        if (artifact.sizeBytes > 0 && existing >= artifact.sizeBytes) {
+          partial.deleteSync();
+          downloaded -= existing;
+          existing = 0;
+        }
+        // Pausing during the previous artifact's SHA-256 pass had no effect:
+        // nothing is in flight for the cancel token to abort, so the next
+        // artifact silently started anyway. Honour both flags per artifact.
+        if (state.paused) {
+          events.add(ModelDownloadPaused(id, downloaded));
+          return null;
+        }
+        if (state.cancelToken?.isCancelled ?? false) {
+          events.add(ModelErrored(id, ModelErrorKind.cancelled, 'cancelled'));
+          return null;
+        }
         final response = await _dio.get<ResponseBody>(
           artifact.downloadUrl ??
               '${manifest.downloadUrl}/${artifact.relativePath}',

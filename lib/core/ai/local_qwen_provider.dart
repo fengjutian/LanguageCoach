@@ -27,17 +27,23 @@ class LocalQwenProvider implements LlmProvider {
     Uuid? uuid,
     SentenceSplitter? splitter,
     int maxKeywords = 4,
+    Duration idleTimeout = const Duration(seconds: 90),
   })  : _bridge = bridge,
         _modelId = modelId,
         _uuid = uuid ?? const Uuid(),
         _splitter = splitter ?? const SentenceSplitter(),
-        _maxKeywords = maxKeywords;
+        _maxKeywords = maxKeywords,
+        _idleTimeout = idleTimeout;
 
   final NativeAiBridge _bridge;
   final String _modelId;
   final Uuid _uuid;
   final SentenceSplitter _splitter;
   final int _maxKeywords;
+
+  /// How long the bridge may stay silent before we give up on the turn.
+  /// Reset on every token so long generations are not cut short.
+  final Duration _idleTimeout;
 
   @override
   String get id => 'Qwen3 (Local)';
@@ -86,21 +92,49 @@ class LocalQwenProvider implements LlmProvider {
       }
 
       late final StreamSubscription<LlmStreamEvent> sub;
+      // The bridge is a broadcast EventChannel: it completes when Android
+      // tears it down, and a wedged runtime never sends LLM_COMPLETE /
+      // LLM_ERROR at all. Without an `onDone` + idle watchdog the chat
+      // bubble would spin forever with the stop button dead.
+      Timer? watchdog;
+
+      void stopWatchdog() {
+        watchdog?.cancel();
+        watchdog = null;
+      }
+
+      void armWatchdog() {
+        stopWatchdog();
+        watchdog = Timer(_idleTimeout, () {
+          if (closed) return;
+          closed = true;
+          stopWatchdog();
+          controller.add(LlmEventError(LlmError(
+            LlmErrorKind.timeout,
+            '本地模型 ${_idleTimeout.inSeconds} 秒没有输出，已中止本次生成。',
+          )));
+          unawaited(sub.cancel());
+          unawaited(controller.close());
+        });
+      }
+
       sub = _bridge.eventStream
           .map((frame) => frame.toLlmStreamEvent())
           .where((e) => e != null && e.sessionId == sessionId)
           .cast<LlmStreamEvent>()
           .listen((ev) async {
         if (closed) return;
+        armWatchdog();
         switch (ev.type) {
           case 'LLM_TOKEN':
-            final token = (ev.payload['token'] as String?) ?? '';
-            if (token.isEmpty) return;
+            final token = ev.payload['token'];
+            if (token is! String || token.isEmpty) return;
             tokenBuffer.write(token);
             controller.add(LlmEventDelta(token));
             break;
           case 'LLM_COMPLETE':
             closed = true;
+            stopWatchdog();
             final text = tokenBuffer.toString();
             controller.add(_buildComplete(text, request));
             await sub.cancel();
@@ -108,6 +142,7 @@ class LocalQwenProvider implements LlmProvider {
             break;
           case 'LLM_ERROR':
             closed = true;
+            stopWatchdog();
             final message =
                 (ev.payload['message'] as String?) ?? '本地模型推理失败';
             controller.add(LlmEventError(
@@ -120,15 +155,36 @@ class LocalQwenProvider implements LlmProvider {
       }, onError: (Object e) async {
         if (closed) return;
         closed = true;
+        stopWatchdog();
         controller.add(LlmEventError(
           LlmError(LlmErrorKind.unknown, '本地模型流错误: $e'),
         ));
         await controller.close();
+      }, onDone: () {
+        // Stream ended without LLM_COMPLETE / LLM_ERROR (activity destroy,
+        // model unloaded, bridge torn down). Flush what we already got so
+        // the turn terminates instead of hanging on a permanent spinner.
+        if (closed) return;
+        closed = true;
+        stopWatchdog();
+        final text = tokenBuffer.toString();
+        if (text.trim().isEmpty) {
+          controller.add(const LlmEventError(LlmError(
+            LlmErrorKind.timeout,
+            '本地模型生成被中断，没有收到任何内容。',
+          )));
+        } else {
+          controller.add(_buildComplete(text, request));
+        }
+        unawaited(controller.close());
       });
+
+      armWatchdog();
 
       // If the consumer cancels its subscription, forward that to the
       // runtime so we don't keep generating tokens.
       controller.onCancel = () async {
+        stopWatchdog();
         if (closed) return;
         closed = true;
         if (sessionId != null) {
@@ -138,7 +194,14 @@ class LocalQwenProvider implements LlmProvider {
       };
     }
 
-    run();
+    unawaited(run().catchError((Object e) {
+      if (closed) return Future<void>.value();
+      closed = true;
+      controller.add(LlmEventError(
+        LlmError(LlmErrorKind.unknown, '本地模型推理异常: $e'),
+      ));
+      return controller.close();
+    }));
     return controller.stream;
   }
 
@@ -152,7 +215,14 @@ class LocalQwenProvider implements LlmProvider {
       ..writeln('Respond only in the target language, briefly.');
     final history = StringBuffer();
     for (final msg in context) {
-      history.writeln('${msg.role.name}: ${msg.response?.primary ?? msg.response?.toString() ?? ''}');
+      // User turns keep their text in `sourceText` and have a null
+      // `response`, so reading only `response` emitted an empty `user:` line
+      // for every prior turn — the model never saw what the user said.
+      final text = msg.role == MessageRole.user
+          ? (msg.sourceText ?? '')
+          : (msg.response?.primary ?? msg.response?.toString() ?? '');
+      if (text.trim().isEmpty) continue;
+      history.writeln('${msg.role.name}: ${text.trim()}');
     }
     if (history.isNotEmpty) {
       sys
@@ -259,38 +329,46 @@ class LocalQwenProvider implements LlmProvider {
   }
 
   String _langHint(String text) {
-    // Heuristic: if the text contains CJK characters, treat it as
-    // CJK for stopword selection. Otherwise default to latin.
-    for (final rune in text.runes) {
-      if (rune >= 0x4e00 && rune <= 0x9fff) return 'cjk';
-    }
+    // Heuristic: if the text contains CJK characters (kanji, kana or
+    // hangul), treat it as CJK for stopword selection. Otherwise latin.
+    if (_cjkChar.hasMatch(text)) return 'cjk';
     return 'latin';
   }
 
   List<String> _tokenize(String text, Set<String> stopwords) {
     final tokens = <String>[];
     final buffer = StringBuffer();
-    void flush() {
+    // CJK has no word boundaries and Dart's `\w` is ASCII-only, so every
+    // Chinese/Japanese character used to be flushed on its own and then
+    // dropped by the `length < 2` filter — keywords were always empty for
+    // CJK output. Latin runs still need the ASCII class.
+    final isCjk = _cjkChar.hasMatch(text);
+    void flush({required bool cjk}) {
       final token = buffer.toString().toLowerCase();
       buffer.clear();
       if (token.isEmpty) return;
       if (stopwords.contains(token)) return;
-      if (token.length < 2) return;
+      // A single CJK glyph is a legitimate token; latin needs >= 2 letters.
+      if (token.length < (cjk ? 1 : 2)) return;
       tokens.add(token);
     }
 
     for (final rune in text.runes) {
       final ch = String.fromCharCode(rune);
-      final isWord = RegExp(r'\w').hasMatch(ch);
-      if (isWord) {
+      final word = _cjkChar.hasMatch(ch) || _latinWord.hasMatch(ch);
+      if (word) {
         buffer.write(ch);
       } else {
-        flush();
+        flush(cjk: isCjk);
       }
     }
-    flush();
+    flush(cjk: isCjk);
     return tokens;
   }
+
+  static final RegExp _cjkChar =
+      RegExp(r'[\u3400-\u9fff\u3040-\u30ff\uac00-\ud7af]');
+  static final RegExp _latinWord = RegExp(r'[A-Za-z0-9_]');
 
   Set<String> _stopwordsFor(String lang) {
     if (lang == 'cjk') {

@@ -84,11 +84,25 @@ class _RoleplayPageState extends ConsumerState<RoleplayPage> {
     _subscription?.cancel();
     _input.dispose();
     _scroll.dispose();
+    // `speechSessionControllerProvider` is a non-autoDispose notifier whose
+    // onDispose only detaches the event stream — native capture kept running
+    // unless somebody called `stop()`. `ref` is unusable during finalization,
+    // so the notifier is captured in `build`.
+    if (_wasListening) {
+      unawaited(_speech?.stop());
+    }
     super.dispose();
   }
 
+  /// Captured while the page is still alive — see [dispose].
+  SpeechSessionController? _speech;
+  bool _wasListening = false;
+
   @override
   Widget build(BuildContext context) {
+    final speech = ref.watch(speechSessionControllerProvider);
+    _speech = ref.read(speechSessionControllerProvider.notifier);
+    _wasListening = speech.listening;
     ref.listen(speechSessionControllerProvider, (previous, next) {
       if (next.partialText.isNotEmpty) {
         _input.text = next.partialText;
@@ -410,6 +424,10 @@ class _RoleplayPageState extends ConsumerState<RoleplayPage> {
 
   Future<void> _finish() async {
     await _subscription?.cancel();
+    // Backing out of the page while the summary streams used to land this
+    // setState after dispose (red screen). The later awaits below were
+    // already guarded; this one was not.
+    if (!mounted) return;
     setState(() {
       _waiting = false;
       _summarizing = true;

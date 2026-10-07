@@ -47,4 +47,26 @@ void main() {
     final out = splitter.split('Hola. 你好。 Bonjour!');
     expect(out, ['Hola.', '你好。', 'Bonjour!']);
   });
+
+  test('does not split inside a decimal number', () {
+    // A `.` between digits is a decimal point. Splitting here produced
+    // "Pi is 3." + "14.", i.e. two TTS requests mid-number.
+    final out = splitter.split('Pi is 3.14.');
+    expect(out, hasLength(1));
+    expect(out.first.trim(), 'Pi is 3.14.');
+  });
+
+  test('still splits a real sentence after a decimal', () {
+    final out = splitter.split('The value is 2.5. That is all.');
+    expect(out, hasLength(2));
+    expect(out.first.trim(), 'The value is 2.5.');
+    expect(out.last.trim(), 'That is all.');
+  });
+
+  test('ellipsis produces a single boundary', () {
+    final out = splitter.split('Wait... what happened?');
+    expect(out, hasLength(2));
+    expect(out.first.trim(), 'Wait...');
+    expect(out.last.trim(), 'what happened?');
+  });
 }

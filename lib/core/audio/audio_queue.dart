@@ -29,13 +29,24 @@ class AudioQueueItem {
 ///   * A new [enqueue] call cancels whatever was queued or playing.
 ///   * `dispose()` releases the underlying player.
 class AudioQueue {
-  AudioQueue({required AudioPlayerService player, this.stopOnError = false})
-      : _player = player {
+  AudioQueue({
+    required AudioPlayerService player,
+    this.stopOnError = false,
+    this.releasePlayerOnDispose = false,
+  }) : _player = player {
     _stateSub = player.stateStream.listen(_onPlayerState);
   }
 
   final AudioPlayerService _player;
   final bool stopOnError;
+
+  /// The player is *injected*, so this queue normally does not own it:
+  /// `main.dart` installs one shared `JustAudioPlayer` that the practice
+  /// pages read through `audioPlayerServiceProvider` too. Releasing it on
+  /// dispose closed the shared player's state controller out from under
+  /// them. Only set this when the caller handed over sole ownership.
+  final bool releasePlayerOnDispose;
+
   final _controller = StreamController<AudioQueueEvent>.broadcast();
   StreamSubscription<AudioPlaybackState>? _stateSub;
 
@@ -91,7 +102,10 @@ class AudioQueue {
 
   Future<void> dispose() async {
     await _stateSub?.cancel();
-    await _player.release();
+    _stateSub = null;
+    if (releasePlayerOnDispose) {
+      await _player.release();
+    }
     await _controller.close();
   }
 

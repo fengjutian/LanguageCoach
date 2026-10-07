@@ -8,6 +8,7 @@ import 'package:language_coach/core/audio/model_manifest.dart';
 import 'package:language_coach/core/models/app_settings.dart';
 import 'package:language_coach/core/models/chat_models.dart';
 import 'package:language_coach/core/native/native_ai_bridge.dart';
+import 'package:language_coach/core/network/api_client.dart';
 
 /// Stand-in bridge that records lifecycle calls and lets the test script
 /// events back through `eventStream` synchronously.
@@ -15,7 +16,13 @@ class _ScriptedBridge implements NativeAiBridge {
   final List<String> methodCalls = <String>[];
   final _events = StreamController<Object?>.broadcast();
 
+  /// Prompt handed to the last `startLlmGeneration` call.
+  String? lastPrompt;
   bool startRejects = false;
+
+  /// Simulates an Android EventChannel teardown: the stream completes
+  /// without ever delivering LLM_COMPLETE / LLM_ERROR.
+  Future<void> closeEventStream() => _events.close();
 
   void emitLlmToken(String sessionId, String token, [int? index]) {
     _events.add(<String, Object?>{
@@ -66,6 +73,7 @@ class _ScriptedBridge implements NativeAiBridge {
     double? temperature,
   }) async {
     methodCalls.add('startLlmGeneration:$sessionId:$modelId');
+    lastPrompt = prompt;
     return startRejects ? null : sessionId;
   }
 
@@ -151,6 +159,120 @@ class _ScriptedBridge implements NativeAiBridge {
 
 void main() {
   group('LocalQwenProvider', () {
+    test('prior user turns reach the prompt', () async {
+      final bridge = _ScriptedBridge();
+      final provider =
+          LocalQwenProvider(bridge: bridge, modelId: qwen3Llm06B.id);
+
+      // User turns carry their text in `sourceText` with a null `response`.
+      // Reading only `response` emitted an empty `user:` line for every one
+      // of them, so the model never saw what the user actually said.
+      final context = <ChatMessage>[
+        ChatMessage(
+          id: 'u1',
+          role: MessageRole.user,
+          sourceText: 'Where is the station?',
+          createdAt: DateTime(2026, 1, 1),
+        ),
+        ChatMessage(
+          id: 'a1',
+          role: MessageRole.assistant,
+          createdAt: DateTime(2026, 1, 1),
+          response: CoachResponse(
+            intent: CoachIntent.conversation,
+            sourceLanguage: 'auto',
+            targetLanguage: 'en',
+            primary: 'It is two blocks away.',
+            explanation: '',
+            sentences: const <CoachSentence>[],
+          ),
+        ),
+      ];
+
+      final sub = provider
+          .generateStream(
+            CoachRequest(
+              text: 'thanks',
+              targetLanguage: CoachLanguage.english,
+              intent: CoachIntent.conversation,
+            ),
+            context,
+          )
+          .listen((_) {});
+      addTearDown(() => _ignoreFuture(sub.cancel()));
+      await pumpMicrotasks();
+
+      final prompt = bridge.lastPrompt ?? '';
+      expect(prompt, contains('user: Where is the station?'));
+      expect(prompt, contains('assistant: It is two blocks away.'));
+    });
+
+    test('stream ending without LLM_COMPLETE still settles', () async {
+      final bridge = _ScriptedBridge();
+      final provider = LocalQwenProvider(
+        bridge: bridge,
+        modelId: qwen3Llm06B.id,
+      );
+
+      final stream = provider.generateStream(
+        CoachRequest(
+          text: 'hello',
+          targetLanguage: CoachLanguage.english,
+          intent: CoachIntent.conversation,
+        ),
+        const <ChatMessage>[],
+      );
+      final received = <LlmEvent>[];
+      final done = Completer<void>();
+      final sub = stream.listen(received.add, onDone: done.complete);
+      addTearDown(() => _ignoreFuture(sub.cancel()));
+
+      await pumpMicrotasks();
+      final sessionId = bridge.methodCalls.last.split(':')[1];
+      bridge.emitLlmToken(sessionId, 'Partial answer');
+
+      // The bridge is a broadcast EventChannel: on Android teardown (activity
+      // destroy, model unload) it simply completes. Without an `onDone` the
+      // controller was never closed, so the chat bubble spun forever with a
+      // dead stop button.
+      await bridge.closeEventStream();
+
+      await done.future.timeout(const Duration(seconds: 2));
+      expect(received.whereType<LlmEventComplete>(), hasLength(1));
+      expect(
+        received.whereType<LlmEventComplete>().single.response.primary,
+        contains('Partial answer'),
+      );
+    });
+
+    test('an idle stream times out instead of hanging forever', () async {
+      final bridge = _ScriptedBridge();
+      final provider = LocalQwenProvider(
+        bridge: bridge,
+        modelId: qwen3Llm06B.id,
+        idleTimeout: const Duration(milliseconds: 120),
+      );
+
+      final received = <LlmEvent>[];
+      final done = Completer<void>();
+      final sub = provider
+          .generateStream(
+            CoachRequest(
+              text: 'hello',
+              targetLanguage: CoachLanguage.english,
+              intent: CoachIntent.conversation,
+            ),
+            const <ChatMessage>[],
+          )
+          .listen(received.add, onDone: done.complete);
+      addTearDown(() => _ignoreFuture(sub.cancel()));
+
+      await done.future.timeout(const Duration(seconds: 5));
+      final errors = received.whereType<LlmEventError>();
+      expect(errors, hasLength(1));
+      expect(errors.single.error.kind, LlmErrorKind.timeout);
+    });
+
     test('emits delta events while the bridge streams tokens, then a complete',
         () async {
       final bridge = _ScriptedBridge();
