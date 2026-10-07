@@ -78,6 +78,8 @@ void main() {
     expect(engine.detectIntent('今天下雨怎么用英语表达？'), CoachIntent.expressionHelp);
     expect(engine.detectIntent('和我模拟酒店入住'), CoachIntent.roleplay);
     expect(engine.detectIntent('随便聊聊'), CoachIntent.conversation);
+    expect(engine.detectIntent('南京'), CoachIntent.vocabulary);
+    expect(engine.detectIntent('serendipity'), CoachIntent.vocabulary);
   });
 
   test('auto router sends grammar/correction/explanation to DeepSeek',

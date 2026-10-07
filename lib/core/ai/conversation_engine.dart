@@ -39,6 +39,16 @@ class ConversationEngine {
     if (text.contains('怎么说') || text.contains('表达')) {
       return CoachIntent.expressionHelp;
     }
+    // A bare word or very short CJK fragment usually means "teach me this
+    // expression" in a language-coaching chat. Classifying it as ordinary
+    // conversation made inputs such as “南京” receive a bare translation
+    // without pronunciation or usage guidance.
+    final compact = text.trim();
+    final isShortCjkTerm = RegExp(r'^[\u3400-\u9fff]{1,3}$').hasMatch(compact);
+    final isSingleLatinTerm = RegExp(r"^[a-z][a-z'-]{1,24}$").hasMatch(compact);
+    if (isShortCjkTerm || isSingleLatinTerm) {
+      return CoachIntent.vocabulary;
+    }
     return CoachIntent.conversation;
   }
 

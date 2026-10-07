@@ -80,7 +80,7 @@ Teaching requirements:
     final messages = <Map<String, Object?>>[
       {'role': 'system', 'content': systemPrompt},
       ...context.map(_toOpenAiMessage),
-      {'role': 'user', 'content': request.text},
+      {'role': 'user', 'content': _composeUserPrompt(request)},
     ];
 
     final body = <String, Object?>{
@@ -162,12 +162,13 @@ Teaching requirements:
 
     if (emittedError) return;
 
-    final response0 = parser.parse(
+    final parsedResponse = parser.parse(
       buffer.toString(),
       intent: request.intent,
       targetLanguage: request.targetLanguage,
       thinkingFromCaller: thinkingBuffer.toString(),
     );
+    final response0 = _ensureTeachingExplanation(parsedResponse, request);
     final message = ChatMessage(
       id: DateTime.now().microsecondsSinceEpoch.toString(),
       role: MessageRole.assistant,
@@ -176,6 +177,28 @@ Teaching requirements:
       model: id,
     );
     yield LlmEventComplete(response0, message);
+  }
+
+  String _composeUserPrompt(CoachRequest request) => '''
+Learner input: ${request.text}
+
+Request metadata (follow this; do not copy it into the answer):
+- detected intent: ${request.intent.name}
+- required target language: ${request.targetLanguage.code}
+- explanation language: the language of the learner input
+''';
+
+  CoachResponse _ensureTeachingExplanation(
+    CoachResponse response,
+    CoachRequest request,
+  ) {
+    if (response.explanation.trim().isNotEmpty) return response;
+    final answer = response.primary.trim();
+    final explanation = answer.isEmpty
+        ? '线上模型没有返回有效回答，请重新生成。'
+        : '“${request.text.trim()}”对应的目标语言回答是“$answer”。'
+            '线上模型本次未附带更详细的用法说明，请重新生成以获取完整解释。';
+    return response.copyWith(explanation: explanation);
   }
 
   Map<String, Object?> _toOpenAiMessage(ChatMessage m) {

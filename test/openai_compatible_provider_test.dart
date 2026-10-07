@@ -154,7 +154,32 @@ void main() {
       (messages.first as Map)['content'],
       contains('Never leave "primary" or "explanation" empty'),
     );
-    expect((messages.last as Map)['content'], '你好，怎么说？😊');
+    final userPrompt = (messages.last as Map)['content'] as String;
+    expect(userPrompt, contains('Learner input: 你好，怎么说？😊'));
+    expect(userPrompt, contains('detected intent: expressionHelp'));
+    expect(userPrompt, contains('required target language: en'));
+  });
+
+  test('fills a visible explanation when the online model omits it', () async {
+    const payload =
+        'data: {"choices":[{"delta":{"content":"{\\"primary\\":\\"Nanjing\\"}"}}]}\n\n'
+        'data: [DONE]\n\n';
+    final provider = _providerWithAdapter(_StreamingAdapter(payload));
+
+    final events = await provider.generateStream(
+      const CoachRequest(
+        text: '南京',
+        intent: CoachIntent.vocabulary,
+        targetLanguage: CoachLanguage.english,
+      ),
+      const <ChatMessage>[],
+    ).toList();
+
+    final response = events.whereType<LlmEventComplete>().single.response;
+    expect(response.primary, 'Nanjing');
+    expect(response.explanation, isNotEmpty);
+    expect(response.explanation, contains('南京'));
+    expect(response.explanation, contains('Nanjing'));
   });
 
   test('routes delta.reasoning_content into LlmEventThinking', () async {
