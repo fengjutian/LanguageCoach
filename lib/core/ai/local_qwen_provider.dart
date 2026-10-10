@@ -278,7 +278,7 @@ class LocalQwenProvider implements LlmProvider {
     return LlmEventComplete(
       response,
       ChatMessage(
-        id: DateTime.now().microsecondsSinceEpoch.toString(),
+        id: const Uuid().v4(),
         role: MessageRole.assistant,
         createdAt: DateTime.now(),
         response: response,

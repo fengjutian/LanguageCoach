@@ -6,6 +6,7 @@ import 'package:language_coach/core/ai/llm_router.dart';
 import 'package:language_coach/core/language/target_language_resolver.dart';
 import 'package:language_coach/core/models/app_settings.dart';
 import 'package:language_coach/core/models/chat_models.dart';
+import 'package:uuid/uuid.dart';
 
 /// The language actually used for one turn, resolved *before* the request is
 /// built. "显式指定 > 会话语言 > 英语兜底" — the chat controller captures this
@@ -68,13 +69,20 @@ class ConversationEngine {
     if (text.contains('怎么说') || text.contains('表达')) {
       return CoachIntent.expressionHelp;
     }
-    // A bare word or very short CJK fragment usually means "teach me this
-    // expression" in a language-coaching chat. Classifying it as ordinary
-    // conversation made inputs such as "南京" receive a bare translation
-    // without pronunciation or usage guidance.
+    // A short CJK term (2-3 characters) or a single Latin word usually means
+    // "teach me this expression" in a language-coaching chat. Classifying it as
+    // vocabulary gives pronunciation and usage guidance instead of a bare
+    // translation. We require at least 2 characters to avoid false positives
+    // from casual conversation (e.g., "你好" is vocabulary, "一" is not).
     final compact = text.trim();
-    final isShortCjkTerm = RegExp(r'^[\u3400-\u9fff]{1,3}$').hasMatch(compact);
-    final isSingleLatinTerm = RegExp(r"^[a-z][a-z'-]{1,24}$").hasMatch(compact);
+    // Skip if it's just punctuation or whitespace.
+    if (compact.isEmpty) return CoachIntent.conversation;
+    // Require 2-3 CJK characters (not single-char common words like "一", "我").
+    final isShortCjkTerm = RegExp(r'^[\u3400-\u9fff]{2,3}$').hasMatch(compact);
+    // Require 2+ Latin characters, no leading/trailing punctuation.
+    final isSingleLatinTerm =
+        RegExp(r"^[a-z][a-z'-]{1,24}$", caseSensitive: false).hasMatch(compact) &&
+            compact.length >= 2;
     if (isShortCjkTerm || isSingleLatinTerm) {
       return CoachIntent.vocabulary;
     }
@@ -157,7 +165,7 @@ class ConversationEngine {
           _needsLanguageSwitchNotice(context, resolved.language),
     );
 
-    final id = DateTime.now().microsecondsSinceEpoch.toString();
+    final id = const Uuid().v4();
     final createdAt = DateTime.now();
 
     final controller = StreamController<LlmEvent>();

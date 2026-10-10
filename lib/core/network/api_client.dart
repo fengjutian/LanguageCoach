@@ -159,7 +159,9 @@ class ApiClient {
     try {
       String raw;
       if (data is ResponseBody) {
-        raw = await utf8.decoder.bind(data.stream).join();
+        // Limit to 4 KiB to prevent memory exhaustion from large error pages.
+          final limited = data.stream.expand((e) => e).take(4096);
+          raw = await utf8.decoder.bind(limited).join();
       } else if (data is String) {
         raw = data;
       } else if (data is Map) {

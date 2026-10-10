@@ -2,6 +2,8 @@
 // request type and provider interface stay co-located; importing it here would
 // produce an ambiguous-import error.
 
+import 'package:uuid/uuid.dart';
+
 /// User-facing intents the coach recognises. The order is meaningful for
 /// `indexOf` lookups and intentionally omits an `unknown` member so that
 /// `values.firstWhere(..., orElse: () => conversation)` stays deterministic.
@@ -89,7 +91,7 @@ class CoachSentence {
       return CoachSentence(
         id: id is String && id.isNotEmpty
             ? id
-            : 's_${DateTime.now().microsecondsSinceEpoch}',
+            : 's_${const Uuid().v4()}',
         text: text?.toString() ?? '',
       );
     }
@@ -326,7 +328,7 @@ class ChatMessage {
     );
 
     return ChatMessage(
-      id: raw['id']?.toString() ?? 'm_${DateTime.now().microsecondsSinceEpoch}',
+      id: raw['id']?.toString() ?? 'm_${const Uuid().v4()}',
       role: role,
       createdAt: createdAt,
       sourceText: raw['sourceText']?.toString(),

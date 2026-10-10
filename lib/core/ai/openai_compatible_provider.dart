@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:developer' as developer;
 
 import 'package:dio/dio.dart';
+import 'package:uuid/uuid.dart';
 import 'package:language_coach/core/ai/llm_event.dart';
 import 'package:language_coach/core/ai/llm_provider.dart';
 import 'package:language_coach/core/ai/structured_response_parser.dart';
